@@ -4,7 +4,7 @@
 
 use crate::cache;
 use crate::cli::{Context, RefreshArgs};
-use crate::commands::{fetch, sync};
+use crate::commands::fetch;
 use crate::id::PaperRef;
 use crate::net::{self, RateLimiter};
 use crate::oai;
@@ -18,13 +18,14 @@ pub async fn run(cx: &Context, args: RefreshArgs) -> Result<()> {
     let r: PaperRef = args.id.parse().context("parsing paper reference")?;
     anyhow::ensure!(
         r.version.is_none(),
-        "`refresh` does not accept a version pin ({})",
+        "refresh always targets the latest version; remove the @vN suffix \
+         from {} (to read a specific cached version, use `fetch <id>@vN`)",
         r
     );
     let root = &cx.cfg.cache_root;
 
-    // 1. Hit OAI-PMH with from=<now - some_window> to pick up this paper
-    //    if it was recently modified. Cheaper: GetRecord for just this id.
+    // GetRecord for just this paper. The datestamp it returns is what we'd
+    // write into latest_known_oai_datestamp.
     let client = net::client(cx.cfg.network.contact.as_deref())?;
     let rl = RateLimiter::new(net::rate_limit_path(root), cx.cfg.network.min_interval_s);
     let url = format!(
@@ -35,41 +36,40 @@ pub async fn run(cx: &Context, args: RefreshArgs) -> Result<()> {
     );
     let body = net::get_text(&client, &rl, &url).await?;
     let page = oai::parse_page(&body).context("parsing OAI-PMH GetRecord response")?;
+    let rec = page
+        .records
+        .first()
+        .ok_or_else(|| anyhow::anyhow!("OAI-PMH returned no record for {}", r.id))?;
 
-    if let Some(rec) = page.records.first() {
-        let mut pm = cache::read_paper_meta(root, r.id).await;
-        let need_write = pm
-            .latest_known_oai_datestamp
-            .as_deref()
-            .map(|existing| existing.as_bytes() < rec.datestamp.as_bytes())
-            .unwrap_or(true);
-        if need_write {
-            pm.latest_known_oai_datestamp = Some(rec.datestamp.clone());
-            cache::write_paper_meta(root, r.id, &pm).await?;
-            info!(id = %r.id, datestamp = %rec.datestamp, "bumped latest_known_oai_datestamp");
-        }
-    } else {
-        anyhow::bail!("OAI-PMH returned no record for {}", r.id);
-    }
+    let mut pm = cache::read_paper_meta(root, r.id).await;
+    let need_write = match pm.latest_known_oai_datestamp.as_deref() {
+        Some(existing) => oai::datestamp_cmp(existing, &rec.datestamp)?.is_lt(),
+        None => true,
+    };
 
     if args.dry_run {
-        println!("{}: would call fetch (dry-run)", r.id);
+        if need_write {
+            println!(
+                "{}: would bump latest_known_oai_datestamp -> {} and fetch new version",
+                r.id, rec.datestamp
+            );
+        } else {
+            println!("{}: already at {}, no fetch needed", r.id, rec.datestamp);
+        }
         return Ok(());
     }
-    if cx.offline {
-        return Ok(());
+
+    if need_write {
+        pm.latest_known_oai_datestamp = Some(rec.datestamp.clone());
+        cache::write_paper_meta(root, r.id, &pm).await?;
+        info!(id = %r.id, datestamp = %rec.datestamp, "bumped latest_known_oai_datestamp");
     }
-    // Now the regular fetch path: it will see the bumped datestamp and
-    // either noop (if v{current}.oai_datestamp is up to date) or pull v{N+1}.
-    let _ = sync::maybe_auto_sync; // sync_hook noop; refresh already did its own
+
     let report = fetch::fetch_ref(cx, PaperRef::current(r.id)).await?;
     if cx.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
-        println!(
-            "{} → v{} ({})",
-            report.id, report.version, report.action
-        );
+        println!("{} → v{} ({})", report.id, report.version, report.action);
     }
     Ok(())
 }

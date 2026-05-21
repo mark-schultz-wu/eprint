@@ -37,16 +37,14 @@ impl Default for LocalConverter {
 
 #[async_trait::async_trait]
 impl Converter for LocalConverter {
-    async fn convert(&self, pdf_path: &Path, quality: Quality) -> Result<Conversion> {
+    /// `LocalConverter` is ML-only. The `Text` tier is served by the
+    /// downstream binary directly via the `pdf-extract` crate, so any
+    /// `Quality` value is treated as ML.
+    async fn convert(&self, pdf_path: &Path, _quality: Quality) -> Result<Conversion> {
         if !pdf_path.exists() {
             return Err(Error::InputNotFound(pdf_path.to_path_buf()));
         }
-        match quality {
-            Quality::Text => Err(Error::BackendUnavailable(
-                "LocalConverter is ML-only; use pdf-extract for --quality=text".into(),
-            )),
-            Quality::Ml => self.convert_ml(pdf_path).await,
-        }
+        self.convert_ml(pdf_path).await
     }
 }
 

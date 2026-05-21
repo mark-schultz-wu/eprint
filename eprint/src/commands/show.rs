@@ -8,7 +8,7 @@ use crate::cli::{Context, ShowArgs};
 use crate::id::PaperRef;
 use anyhow::{Context as _, Result};
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::Path;
 
 #[derive(Debug, Serialize)]
 struct ShowOutput {
@@ -91,7 +91,7 @@ pub async fn run(cx: &Context, args: ShowArgs) -> Result<()> {
     Ok(())
 }
 
-async fn read_optional(p: &PathBuf) -> Option<String> {
+async fn read_optional(p: &Path) -> Option<String> {
     tokio::fs::read_to_string(p).await.ok()
 }
 

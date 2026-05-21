@@ -42,15 +42,23 @@ async fn main() -> Result<()> {
 }
 
 fn init_tracing(verbose: u8, format: cli::LogFormat) {
-    // -v / -vv / -vvv override the env filter; RUST_LOG still wins if set.
+    // Precedence: -v / -vv / -vvv sets a default filter; RUST_LOG (if set)
+    // *augments* it rather than replacing entirely. Lets users say
+    // `-v RUST_LOG=papermd::local=trace` to opt in to module-level detail.
     let default_level = match verbose {
         0 => "warn",
         1 => "info",
         2 => "debug",
         _ => "trace",
     };
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(format!("eprint={default_level},papermd={default_level}")));
+    let mut filter = EnvFilter::new(format!("eprint={default_level},papermd={default_level}"));
+    if let Ok(env_filter) = std::env::var(EnvFilter::DEFAULT_ENV) {
+        for directive in env_filter.split(',') {
+            if let Ok(parsed) = directive.parse() {
+                filter = filter.add_directive(parsed);
+            }
+        }
+    }
     let registry = tracing_subscriber::registry().with(filter);
     match format {
         cli::LogFormat::Pretty => registry.with(tracing_subscriber::fmt::layer()).init(),

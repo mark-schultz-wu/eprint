@@ -121,7 +121,9 @@ async fn decide_action(root: &Path, id: PaperId, paper_meta: &PaperMeta) -> Deci
         paper_meta.latest_known_oai_datestamp.as_deref(),
         version_meta.oai_datestamp.as_deref(),
     ) {
-        (Some(seen), Some(cached)) => seen > cached,
+        (Some(seen), Some(cached)) => crate::oai::datestamp_cmp(seen, cached)
+            .map(|o| o.is_gt())
+            .unwrap_or(false),
         (Some(_), None) => true, // current version has no datestamp yet; if sync saw any, treat as stale
         _ => false,              // no sync info at all; trust the cache
     };

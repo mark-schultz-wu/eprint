@@ -63,6 +63,17 @@ pub async fn maybe_auto_sync(cx: &Context) -> Result<bool> {
         return Ok(false);
     }
     let root = &cx.cfg.cache_root;
+
+    // Sync's payoff is "annotate cached papers." If there are none, the
+    // whole operation is a no-op — skip and tell the user why.
+    if !cache_has_any_paper(root) {
+        if !cx.json {
+            eprintln!("auto-sync skipped: no papers in cache yet");
+        }
+        info!("auto-sync skipped: cache contains no papers");
+        return Ok(false);
+    }
+
     let last = read_last_sync(root).await;
     let now = now_unix();
     let threshold_s = (cx.cfg.sync.stale_after_hours as i64) * 3600;
@@ -73,13 +84,48 @@ pub async fn maybe_auto_sync(cx: &Context) -> Result<bool> {
     if !needs_sync {
         return Ok(false);
     }
-    info!(
-        last_sync = ?last,
-        threshold_s,
-        "cache is stale; running auto-sync"
-    );
-    let _ = sync_impl(cx, None, 30).await?;
+
+    if !cx.json {
+        match last {
+            Some(t) => {
+                let age_h = (now - t) / 3600;
+                eprintln!("auto-syncing eprint metadata (last sync: {age_h}h ago)...");
+            }
+            None => {
+                eprintln!("auto-syncing eprint metadata (first sync)...");
+            }
+        }
+    }
+    info!(last_sync = ?last, threshold_s, "auto-sync starting");
+    let report = sync_impl(cx, None, 30).await?;
+    if !cx.json {
+        eprintln!(
+            "  done ({} records, {} annotated, {} backfilled)",
+            report.records_seen,
+            report.cached_papers_annotated,
+            report.current_version_backfills
+        );
+    }
     Ok(true)
+}
+
+/// True iff the cache root has at least one `<year>/<num>/meta.json`
+/// whose tool tag identifies it as ours.
+fn cache_has_any_paper(root: &std::path::Path) -> bool {
+    let Ok(rd) = std::fs::read_dir(root) else { return false };
+    for year in rd.flatten() {
+        if !year.file_name().to_string_lossy().chars().all(|c| c.is_ascii_digit()) {
+            continue;
+        }
+        let Ok(num_rd) = std::fs::read_dir(year.path()) else { continue };
+        for paper in num_rd.flatten() {
+            let meta = paper.path().join(cache::files::PAPER_META);
+            if meta.exists() {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 async fn sync_impl(
@@ -106,9 +152,8 @@ async fn sync_impl(
         }
         let mut paper_meta = cache::read_paper_meta(root, rec.id).await;
         let need_paper_write = match paper_meta.latest_known_oai_datestamp.as_deref() {
-            Some(existing) if existing.as_bytes() < rec.datestamp.as_bytes() => true,
+            Some(existing) => oai::datestamp_cmp(existing, &rec.datestamp)?.is_lt(),
             None => true,
-            _ => false,
         };
         if need_paper_write {
             paper_meta.latest_known_oai_datestamp = Some(rec.datestamp.clone());

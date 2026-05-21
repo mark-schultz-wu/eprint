@@ -33,9 +33,18 @@ pub mod files {
     pub const PAPER_META: &str = "meta.json";
 }
 
+/// Magic field embedded in every paper-level `meta.json` so destructive
+/// operations (e.g. `eprint cache clear`) can positively identify that a
+/// directory is one of our cache entries before recursively deleting it.
+pub const TOOL_TAG: &str = "eprint";
+
 /// Paper-level state. Lives at `<root>/<year>/<num>/meta.json`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaperMeta {
+    /// Tool that owns this directory; always `"eprint"` for us. Defaulted
+    /// when reading legacy meta.json that lacked the field.
+    #[serde(default = "default_tool_tag")]
+    pub tool: String,
     /// Which `vN` is the user-visible "latest" version. `None` until the
     /// first version is written.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -47,6 +56,21 @@ pub struct PaperMeta {
     /// Paper title from the landing page (best-effort).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+}
+
+impl Default for PaperMeta {
+    fn default() -> Self {
+        Self {
+            tool: TOOL_TAG.into(),
+            current_version: None,
+            latest_known_oai_datestamp: None,
+            title: None,
+        }
+    }
+}
+
+fn default_tool_tag() -> String {
+    TOOL_TAG.into()
 }
 
 /// Per-version state. Lives at `<root>/<year>/<num>/vN/meta.json`.

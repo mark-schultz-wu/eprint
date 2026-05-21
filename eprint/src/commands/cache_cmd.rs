@@ -111,24 +111,36 @@ async fn clear(cx: &Context, dry_run: bool) -> Result<()> {
         println!("(cache is empty: {})", root.display());
         return Ok(());
     }
-    // Count what we'd remove.
-    let mut papers = 0u64;
+
+    // Identify which year/<num> subtrees actually belong to us, by
+    // checking each paper's meta.json has the right tool tag. Anything
+    // unrecognized is left alone — protects against `EPRINT_CACHE_DIR=$HOME`
+    // accidentally nuking unrelated year-numbered dirs.
+    let mut to_remove: Vec<std::path::PathBuf> = Vec::new();
     let mut bytes = 0u64;
+    let mut foreign = 0u64;
     if let Ok(rd) = std::fs::read_dir(root) {
         for year in rd.flatten() {
             if !year.file_name().to_string_lossy().chars().all(|c| c.is_ascii_digit()) {
                 continue;
             }
-            if let Ok(num_rd) = std::fs::read_dir(year.path()) {
-                for paper in num_rd.flatten() {
-                    if paper.path().is_dir() {
-                        papers += 1;
-                        bytes += dir_size(&paper.path());
-                    }
+            let Ok(num_rd) = std::fs::read_dir(year.path()) else { continue };
+            for paper in num_rd.flatten() {
+                let paper_path = paper.path();
+                if !paper_path.is_dir() {
+                    continue;
+                }
+                let meta_path = paper_path.join(cache::files::PAPER_META);
+                if is_eprint_paper(&meta_path) {
+                    bytes += dir_size(&paper_path);
+                    to_remove.push(paper_path);
+                } else {
+                    foreign += 1;
                 }
             }
         }
     }
+    let papers = to_remove.len() as u64;
     if dry_run {
         println!(
             "would delete {} papers, {} from {}",
@@ -136,15 +148,19 @@ async fn clear(cx: &Context, dry_run: bool) -> Result<()> {
             fmt_bytes(bytes),
             root.display()
         );
+        if foreign > 0 {
+            println!(
+                "  ({} directories did NOT have an eprint meta.json and would be left in place)",
+                foreign
+            );
+        }
         return Ok(());
     }
-    // Actually delete: remove only the year/<num>/ subtrees, leave
-    // .rate_limit_stamp / .last_sync_unix_s alone.
-    if let Ok(rd) = std::fs::read_dir(root) {
-        for year in rd.flatten() {
-            if year.file_name().to_string_lossy().chars().all(|c| c.is_ascii_digit()) {
-                std::fs::remove_dir_all(year.path())?;
-            }
+    for p in &to_remove {
+        std::fs::remove_dir_all(p)?;
+        // Try to remove the year-dir if it's now empty; ignore failure.
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::remove_dir(parent);
         }
     }
     println!(
@@ -153,7 +169,20 @@ async fn clear(cx: &Context, dry_run: bool) -> Result<()> {
         fmt_bytes(bytes),
         root.display()
     );
+    if foreign > 0 {
+        println!(
+            "  ({} unrecognized directories left in place)",
+            foreign
+        );
+    }
     Ok(())
+}
+
+/// True iff `meta_path` exists and its JSON has `"tool": "eprint"`.
+fn is_eprint_paper(meta_path: &Path) -> bool {
+    let Ok(s) = std::fs::read_to_string(meta_path) else { return false };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) else { return false };
+    v.get("tool").and_then(|t| t.as_str()) == Some(cache::TOOL_TAG)
 }
 
 fn dir_size(p: &Path) -> u64 {

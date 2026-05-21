@@ -16,19 +16,60 @@ use anyhow::{Context as _, Result};
 use quick_xml::events::Event;
 use quick_xml::Reader;
 use std::str::FromStr;
-use tracing::{debug, info_span, Instrument};
+use tracing::{info, info_span, Instrument};
 
 pub const BASE_URL: &str = "https://eprint.iacr.org/oai";
+
+/// Expected OAI-PMH datestamp shape: `YYYY-MM-DDThh:mm:ssZ`, fixed-width UTC.
+/// Sort order on this format == chronological order, so callers can use
+/// [`datestamp_cmp`] to compare two values.
+///
+/// If eprint ever changes format (milliseconds, timezone offsets, etc.),
+/// callers will see [`DatestampError::Shape`] and we'll know to update.
+pub const DATESTAMP_REGEX: &str = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$";
 
 /// One record's signal from the OAI-PMH response: which paper, and when
 /// did its metadata last change.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordHeader {
     pub id: PaperId,
-    /// ISO 8601 timestamp, e.g. `2026-05-21T08:48:16Z`. We treat it as an
-    /// opaque sortable string — string comparison gives the right ordering
-    /// for the fixed ISO format eprint uses.
+    /// ISO 8601 timestamp; matches [`DATESTAMP_REGEX`]. Compare via
+    /// [`datestamp_cmp`], not raw `<`/`>`.
     pub datestamp: String,
+}
+
+/// Errors comparing OAI datestamps.
+#[derive(Debug, thiserror::Error)]
+pub enum DatestampError {
+    #[error(
+        "OAI-PMH datestamp {got:?} doesn't match expected shape \
+         YYYY-MM-DDThh:mm:ssZ; eprint may have changed its schema"
+    )]
+    Shape { got: String },
+}
+
+/// Compare two OAI datestamps, returning their chronological ordering.
+///
+/// Validates both strings against [`DATESTAMP_REGEX`] first; if eprint
+/// ever changes the format, callers see [`DatestampError::Shape`]
+/// instead of subtly-wrong byte-comparison results.
+pub fn datestamp_cmp(a: &str, b: &str) -> Result<std::cmp::Ordering, DatestampError> {
+    if !is_valid_datestamp(a) {
+        return Err(DatestampError::Shape { got: a.to_owned() });
+    }
+    if !is_valid_datestamp(b) {
+        return Err(DatestampError::Shape { got: b.to_owned() });
+    }
+    // Once both match the fixed-width regex, lexicographic byte order
+    // == chronological order.
+    Ok(a.cmp(b))
+}
+
+/// Returns true if `s` matches `YYYY-MM-DDThh:mm:ssZ`.
+pub fn is_valid_datestamp(s: &str) -> bool {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    RE.get_or_init(|| regex::Regex::new(DATESTAMP_REGEX).unwrap())
+        .is_match(s)
 }
 
 /// Outcome of one OAI-PMH page parse.
@@ -54,10 +95,16 @@ pub async fn list_records(
     async {
         let mut out: Vec<RecordHeader> = Vec::new();
         let mut url = first_url(from);
+        let mut page_num = 1u32;
         loop {
             let body = net::get_text(client, rl, &url).await?;
             let page = parse_page(&body).context("parsing OAI-PMH response")?;
-            debug!(records = page.records.len(), "OAI-PMH page");
+            info!(
+                page = page_num,
+                records_on_page = page.records.len(),
+                total_so_far = out.len() + page.records.len(),
+                "OAI-PMH page fetched"
+            );
             if page.no_records_match {
                 break;
             }
@@ -68,6 +115,7 @@ pub async fn list_records(
                         "{BASE_URL}?verb=ListRecords&resumptionToken={}",
                         urlencode(&token)
                     );
+                    page_num += 1;
                 }
                 _ => break,
             }
@@ -294,5 +342,38 @@ mod tests {
             parse_oai_identifier("oai:eprint.iacr.org:2024/463"),
             Some(PaperId { year: 2024, num: 463 })
         );
+    }
+
+    #[test]
+    fn validates_datestamp_shape() {
+        assert!(is_valid_datestamp("2026-05-21T08:48:16Z"));
+        assert!(!is_valid_datestamp("2026-05-21")); // date only
+        assert!(!is_valid_datestamp("2026-05-21T08:48:16+00:00")); // tz offset
+        assert!(!is_valid_datestamp("2026-05-21T08:48:16.123Z")); // ms
+        assert!(!is_valid_datestamp(""));
+    }
+
+    #[test]
+    fn datestamp_cmp_orders_chronologically() {
+        let a = "2026-05-21T08:48:16Z";
+        let b = "2026-05-21T09:00:00Z";
+        let c = "2027-01-01T00:00:00Z";
+        assert!(datestamp_cmp(a, b).unwrap().is_lt());
+        assert!(datestamp_cmp(b, a).unwrap().is_gt());
+        assert!(datestamp_cmp(a, a).unwrap().is_eq());
+        assert!(datestamp_cmp(b, c).unwrap().is_lt());
+    }
+
+    #[test]
+    fn datestamp_cmp_rejects_malformed() {
+        let good = "2026-05-21T08:48:16Z";
+        assert!(matches!(
+            datestamp_cmp("2026-05-21", good),
+            Err(DatestampError::Shape { .. })
+        ));
+        assert!(matches!(
+            datestamp_cmp(good, "garbage"),
+            Err(DatestampError::Shape { .. })
+        ));
     }
 }
