@@ -1,22 +1,18 @@
 //! Convert academic PDFs to Markdown.
 //!
-//! [`Converter`] is the entry point. Two backends behind Cargo features:
+//! [`Converter`] is the entry point. Two backends:
 //!
-//! - `local` ([`LocalConverter`]) — subprocesses MinerU via `uv`.
-//! - `remote` ([`RemoteConverter`]) — HTTP client that talks to a server
-//!   speaking `POST /v1/convert` (MinerU's FastAPI server in v1).
+//! - [`LocalConverter`] — subprocesses MinerU via `uv`.
+//! - [`RemoteConverter`] — HTTP client that talks to a server speaking
+//!   `POST /v1/convert` (MinerU's FastAPI server in v1).
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[cfg(feature = "local")]
 pub mod local;
-#[cfg(feature = "remote")]
 pub mod remote;
 
-#[cfg(feature = "local")]
 pub use local::LocalConverter;
-#[cfg(feature = "remote")]
 pub use remote::RemoteConverter;
 
 /// Quality tier requested from a [`Converter`].
@@ -55,7 +51,6 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("subprocess failed (exit code {code:?}): {stderr}")]
     Subprocess { code: Option<i32>, stderr: String },
-    #[cfg(feature = "remote")]
     #[error("http error: {0}")]
     Http(#[from] reqwest::Error),
     #[error("unexpected: {0}")]

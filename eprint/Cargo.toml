@@ -8,7 +8,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-papermd = { path = "../papermd", default-features = false, features = ["local", "remote"] }
+papermd = { path = "../papermd" }
 
 clap = { workspace = true }
 serde = { workspace = true }
@@ -21,6 +21,7 @@ tracing-subscriber = { workspace = true }
 reqwest = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
+bytes = { workspace = true }
 
 # Pure-Rust text-only extraction
 pdf-extract = "0.10"

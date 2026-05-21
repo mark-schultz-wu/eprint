@@ -7,11 +7,6 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
-[features]
-default = ["local"]
-local = ["dep:tempfile"]
-remote = ["dep:reqwest"]
-
 [dependencies]
 async-trait = { workspace = true }
 serde = { workspace = true }
@@ -20,6 +15,5 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio = { workspace = true }
 bytes = { workspace = true }
-
-tempfile = { version = "3", optional = true }
-reqwest = { workspace = true, optional = true }
+tempfile = "3"
+reqwest = { workspace = true }

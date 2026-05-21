@@ -5,8 +5,8 @@ members = ["eprint", "papermd"]
 [workspace.package]
 edition = "2021"
 license = "Apache-2.0"
-authors = ["Mark Schultz-Wu <mschultz-wu@fabriccryptography.com>"]
-repository = "https://github.com/fabriccryptography/eprint"
+authors = ["Mark Schultz-Wu <mark@schultz-wu.com>"]
+repository = "https://github.com/mark-schultz-wu/eprint"
 
 [workspace.dependencies]
 clap = { version = "4.5", features = ["derive", "env"] }

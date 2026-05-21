@@ -9,6 +9,7 @@ mod commands;
 mod config;
 mod id;
 mod net;
+mod scrape;
 
 use anyhow::Result;
 use clap::Parser;
