@@ -1,0 +1,128 @@
+//! Clap-derive CLI structures.
+
+use crate::config::Config;
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use papermd::Quality;
+use std::path::PathBuf;
+
+/// Fetch and convert IACR ePrint papers.
+#[derive(Debug, Parser)]
+#[command(name = "eprint", version, about)]
+pub struct Cli {
+    /// Path to config file (default: $XDG_CONFIG_HOME/eprint/config.toml).
+    #[arg(long, global = true)]
+    pub config: Option<PathBuf>,
+    /// Never make network requests; error if cache miss.
+    #[arg(long, global = true)]
+    pub offline: bool,
+    /// Emit JSON output instead of human-readable text.
+    #[arg(long, global = true)]
+    pub json: bool,
+    /// Increase verbosity: -v info, -vv debug, -vvv trace.
+    #[arg(short = 'v', long = "verbose", action = clap::ArgAction::Count, global = true)]
+    pub verbose: u8,
+    /// Log output format.
+    #[arg(long, value_enum, default_value_t = LogFormat::Pretty, global = true)]
+    pub log_format: LogFormat,
+    #[command(subcommand)]
+    pub command: Command,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum LogFormat {
+    Pretty,
+    Json,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// Fetch a paper's artifacts (PDF, BibTeX, abstract) into the cache.
+    Fetch(FetchArgs),
+    /// Print cached metadata for a paper.
+    Show(ShowArgs),
+    /// Convert a paper's PDF to Markdown.
+    Convert(ConvertArgs),
+    /// Re-fetch all artifacts for a paper, replacing the cached copies.
+    Refresh(RefreshArgs),
+    /// Report cache staleness for a paper.
+    Check(CheckArgs),
+    /// Cache management.
+    Cache(CacheArgs),
+}
+
+/// Shared bag of CLI-wide context passed to each subcommand handler.
+pub struct Context {
+    pub cfg: Config,
+    pub offline: bool,
+    pub json: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct FetchArgs {
+    /// Paper id, e.g. "2024/463".
+    pub id: String,
+}
+
+#[derive(Debug, Args)]
+pub struct ShowArgs {
+    pub id: String,
+}
+
+#[derive(Debug, Args)]
+pub struct ConvertArgs {
+    pub id: String,
+    /// Output quality tier.
+    #[arg(long, value_enum, default_value_t = QualityArg::Text)]
+    pub quality: QualityArg,
+    /// Write markdown to this path instead of stdout.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum QualityArg {
+    Text,
+    Ml,
+}
+
+impl From<QualityArg> for Quality {
+    fn from(q: QualityArg) -> Self {
+        match q {
+            QualityArg::Text => Quality::Text,
+            QualityArg::Ml => Quality::Ml,
+        }
+    }
+}
+
+#[derive(Debug, Args)]
+pub struct RefreshArgs {
+    pub id: String,
+    /// Print the actions that would be taken without writing anything.
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct CheckArgs {
+    pub id: String,
+}
+
+#[derive(Debug, Args)]
+pub struct CacheArgs {
+    #[command(subcommand)]
+    pub command: CacheCommand,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum CacheCommand {
+    /// Print the cache root path.
+    Path,
+    /// List cached papers (with sizes).
+    List,
+    /// Delete all cached papers.
+    Clear {
+        /// Print what would be deleted without writing anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
+}
