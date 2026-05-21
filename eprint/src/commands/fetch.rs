@@ -38,6 +38,7 @@ pub struct FetchReport {
 
 pub async fn run(cx: &Context, args: FetchArgs) -> Result<()> {
     let r: PaperRef = args.id.parse().context("parsing paper reference")?;
+    crate::commands::sync::maybe_auto_sync(cx).await?;
     let report = fetch_ref(cx, r).await?;
     if cx.json {
         println!("{}", serde_json::to_string_pretty(&report)?);

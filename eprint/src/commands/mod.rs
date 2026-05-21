@@ -4,6 +4,7 @@
 pub mod cache_cmd;
 pub mod check;
 pub mod convert;
+pub mod feed;
 pub mod fetch;
 pub mod refresh;
 pub mod show;

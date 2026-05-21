@@ -36,10 +36,61 @@ pub async fn run(cx: &Context, args: SyncArgs) -> Result<()> {
     if cx.offline {
         anyhow::bail!("--offline set; sync requires network");
     }
+    let report = sync_impl(cx, args.since.as_deref(), args.default_window_days).await?;
+    if cx.json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "Sync from {}: {} records seen, {} cached papers annotated (stale flag bumped), \
+             {} current-version backfills.",
+            report.from,
+            report.records_seen,
+            report.cached_papers_annotated,
+            report.current_version_backfills
+        );
+    }
+    Ok(())
+}
+
+/// Run sync once if `cfg.sync.auto` is enabled and the cache is older
+/// than the configured threshold. No-op otherwise. Silent unless tracing
+/// is enabled.
+///
+/// Called at the top of cache-reading commands. Returns whether sync
+/// actually ran.
+pub async fn maybe_auto_sync(cx: &Context) -> Result<bool> {
+    if cx.offline || !cx.cfg.sync.auto {
+        return Ok(false);
+    }
+    let root = &cx.cfg.cache_root;
+    let last = read_last_sync(root).await;
+    let now = now_unix();
+    let threshold_s = (cx.cfg.sync.stale_after_hours as i64) * 3600;
+    let needs_sync = match last {
+        Some(t) => (now - t) > threshold_s,
+        None => true, // never synced
+    };
+    if !needs_sync {
+        return Ok(false);
+    }
+    info!(
+        last_sync = ?last,
+        threshold_s,
+        "cache is stale; running auto-sync"
+    );
+    let _ = sync_impl(cx, None, 30).await?;
+    Ok(true)
+}
+
+async fn sync_impl(
+    cx: &Context,
+    since: Option<&str>,
+    default_window_days: u32,
+) -> Result<SyncReport> {
     let root = &cx.cfg.cache_root;
     tokio::fs::create_dir_all(root).await?;
 
-    let from = effective_from(root, args.since.as_deref(), args.default_window_days).await;
+    let from = effective_from(root, since, default_window_days).await;
     info!(from = %from, "starting OAI-PMH sync");
 
     let client = net::client(cx.cfg.network.contact.as_deref())?;
@@ -77,26 +128,19 @@ pub async fn run(cx: &Context, args: SyncArgs) -> Result<()> {
     let now = now_unix();
     write_last_sync(root, now).await?;
 
-    let report = SyncReport {
+    Ok(SyncReport {
         from,
         records_seen: records.len(),
         cached_papers_annotated: annotated,
         current_version_backfills: backfilled,
         last_sync_unix_s: now,
-    };
-    if cx.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
-    } else {
-        println!(
-            "Sync from {}: {} records seen, {} cached papers annotated (stale flag bumped), \
-             {} current-version backfills.",
-            report.from,
-            report.records_seen,
-            report.cached_papers_annotated,
-            report.current_version_backfills
-        );
-    }
-    Ok(())
+    })
+}
+
+async fn read_last_sync(root: &Path) -> Option<i64> {
+    let path = root.join(LAST_SYNC_STAMP);
+    let s = tokio::fs::read_to_string(&path).await.ok()?;
+    s.trim().parse::<i64>().ok()
 }
 
 /// Decide the `from=` timestamp to use:

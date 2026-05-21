@@ -20,6 +20,7 @@ use tracing::info;
 pub async fn run(cx: &Context, args: ConvertArgs) -> Result<()> {
     let r: PaperRef = args.id.parse().context("parsing paper reference")?;
     let requested: Quality = args.quality.into();
+    crate::commands::sync::maybe_auto_sync(cx).await?;
 
     // Ensure we have a version on disk to convert. Auto-fetch via fetch_ref
     // (which handles version pins, staleness, and offline mode).

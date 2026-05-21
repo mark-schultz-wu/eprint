@@ -7,6 +7,7 @@ mod cache;
 mod cli;
 mod commands;
 mod config;
+mod feed;
 mod id;
 mod net;
 mod oai;
@@ -36,6 +37,7 @@ async fn main() -> Result<()> {
         cli::Command::Check(c) => commands::check::run(&cx, c).await,
         cli::Command::Cache(c) => commands::cache_cmd::run(&cx, c).await,
         cli::Command::Sync(c) => commands::sync::run(&cx, c).await,
+        cli::Command::Feed(c) => commands::feed::run(&cx, c).await,
     }
 }
 

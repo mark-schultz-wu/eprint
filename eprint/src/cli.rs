@@ -54,6 +54,8 @@ pub enum Command {
     /// Run an OAI-PMH sync: annotate cached papers with newer
     /// modification dates. Does NOT download PDFs; next `fetch` does.
     Sync(SyncArgs),
+    /// Browse the eprint RSS feed.
+    Feed(FeedArgs),
 }
 
 /// Shared bag of CLI-wide context passed to each subcommand handler.
@@ -111,6 +113,53 @@ pub struct RefreshArgs {
 #[derive(Debug, Args)]
 pub struct CheckArgs {
     pub id: String,
+}
+
+#[derive(Debug, Args)]
+pub struct FeedArgs {
+    /// Which feed view to use.
+    #[arg(value_enum, default_value_t = FeedView::Updates)]
+    pub view: FeedView,
+    /// Filter by eprint category.
+    #[arg(long, value_enum)]
+    pub category: Option<FeedCategory>,
+    /// Maximum number of items to display.
+    #[arg(long, default_value_t = 20)]
+    pub limit: usize,
+}
+
+/// `new` = items ordered by publication date (`?order=recent`). `updates`
+/// = items ordered by last-modified (default eprint ordering — revisions
+/// bump back to the top).
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum FeedView {
+    New,
+    Updates,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum FeedCategory {
+    Applications,
+    Protocols,
+    Foundations,
+    Implementation,
+    Secretkey,
+    Publickey,
+    Attacks,
+}
+
+impl FeedCategory {
+    pub fn as_query(&self) -> &'static str {
+        match self {
+            FeedCategory::Applications => "APPLICATIONS",
+            FeedCategory::Protocols => "PROTOCOLS",
+            FeedCategory::Foundations => "FOUNDATIONS",
+            FeedCategory::Implementation => "IMPLEMENTATION",
+            FeedCategory::Secretkey => "SECRETKEY",
+            FeedCategory::Publickey => "PUBLICKEY",
+            FeedCategory::Attacks => "ATTACKS",
+        }
+    }
 }
 
 #[derive(Debug, Args)]
