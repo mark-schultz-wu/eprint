@@ -31,7 +31,7 @@ pub struct ConvertConfig {
     pub ml: BackendConfig,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BackendConfig {
     /// "local" or "remote".
     #[serde(default = "default_backend")]
@@ -42,6 +42,16 @@ pub struct BackendConfig {
     /// For backend = "remote": env var holding the bearer token.
     #[serde(default)]
     pub token_env: Option<String>,
+}
+
+impl Default for BackendConfig {
+    fn default() -> Self {
+        Self {
+            backend: default_backend(),
+            endpoint: None,
+            token_env: None,
+        }
+    }
 }
 
 fn default_backend() -> String {
