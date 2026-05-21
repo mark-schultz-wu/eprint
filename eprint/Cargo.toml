@@ -21,6 +21,7 @@ reqwest = { workspace = true }
 tokio = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
+quick-xml = { workspace = true }
 
 # Pure-Rust text-only extraction
 pdf-extract = "0.10"

@@ -51,6 +51,9 @@ pub enum Command {
     Check(CheckArgs),
     /// Cache management.
     Cache(CacheArgs),
+    /// Run an OAI-PMH sync: annotate cached papers with newer
+    /// modification dates. Does NOT download PDFs; next `fetch` does.
+    Sync(SyncArgs),
 }
 
 /// Shared bag of CLI-wide context passed to each subcommand handler.
@@ -108,6 +111,17 @@ pub struct RefreshArgs {
 #[derive(Debug, Args)]
 pub struct CheckArgs {
     pub id: String,
+}
+
+#[derive(Debug, Args)]
+pub struct SyncArgs {
+    /// ISO date (or datetime) to start from. Overrides the cached
+    /// `.last_sync_unix_s` timestamp.
+    #[arg(long)]
+    pub since: Option<String>,
+    /// If no last-sync timestamp and `--since` not given, default to N days ago.
+    #[arg(long, default_value_t = 30)]
+    pub default_window_days: u32,
 }
 
 #[derive(Debug, Args)]

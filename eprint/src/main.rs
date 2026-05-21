@@ -9,6 +9,7 @@ mod commands;
 mod config;
 mod id;
 mod net;
+mod oai;
 mod scrape;
 
 use anyhow::Result;
@@ -34,6 +35,7 @@ async fn main() -> Result<()> {
         cli::Command::Refresh(c) => commands::refresh::run(&cx, c).await,
         cli::Command::Check(c) => commands::check::run(&cx, c).await,
         cli::Command::Cache(c) => commands::cache_cmd::run(&cx, c).await,
+        cli::Command::Sync(c) => commands::sync::run(&cx, c).await,
     }
 }
 

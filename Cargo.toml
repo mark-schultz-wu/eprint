@@ -20,6 +20,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process", "io-util"] }
 async-trait = "0.1"
 bytes = "1"
+quick-xml = "0.36"
 
 [profile.release]
 opt-level = 3

@@ -7,3 +7,4 @@ pub mod convert;
 pub mod fetch;
 pub mod refresh;
 pub mod show;
+pub mod sync;
