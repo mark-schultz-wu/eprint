@@ -81,7 +81,7 @@ async fn fetch_current(cx: &Context, id: PaperId) -> Result<FetchReport> {
     let paper_meta = cache::read_paper_meta(root, id).await;
 
     // Decide what to do based on current cache state.
-    let action = decide_action(root, id, &paper_meta).await;
+    let action = decide_action(root, id, &paper_meta).await?;
 
     match action {
         Decision::CacheHit { version } => {
@@ -109,29 +109,31 @@ enum Decision {
     Download { version: u32, action: &'static str },
 }
 
-async fn decide_action(root: &Path, id: PaperId, paper_meta: &PaperMeta) -> Decision {
+async fn decide_action(root: &Path, id: PaperId, paper_meta: &PaperMeta) -> Result<Decision> {
     let versions = cache::existing_versions(root, id);
     if versions.is_empty() {
-        return Decision::Download { version: 1, action: "first-fetch" };
+        return Ok(Decision::Download { version: 1, action: "first-fetch" });
     }
     let current = paper_meta.current_version.unwrap_or_else(|| *versions.last().unwrap());
     // Stale if sync has seen a newer OAI datestamp than the current version's.
+    // A malformed datestamp (eprint schema change) is propagated rather than
+    // swallowed — silently treating it as "fresh" would mask the bug.
     let version_meta = cache::read_version_meta(root, id, current).await;
     let stale = match (
         paper_meta.latest_known_oai_datestamp.as_deref(),
         version_meta.oai_datestamp.as_deref(),
     ) {
         (Some(seen), Some(cached)) => crate::oai::datestamp_cmp(seen, cached)
-            .map(|o| o.is_gt())
-            .unwrap_or(false),
+            .context("comparing cached vs latest OAI datestamps")?
+            .is_gt(),
         (Some(_), None) => true, // current version has no datestamp yet; if sync saw any, treat as stale
         _ => false,              // no sync info at all; trust the cache
     };
     if stale {
         let next = current.saturating_add(1);
-        Decision::Download { version: next, action: "new-version" }
+        Ok(Decision::Download { version: next, action: "new-version" })
     } else {
-        Decision::CacheHit { version: current }
+        Ok(Decision::CacheHit { version: current })
     }
 }
 

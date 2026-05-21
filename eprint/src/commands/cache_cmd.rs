@@ -217,3 +217,52 @@ fn fmt_bytes(n: u64) -> String {
         format!("{f:.1} {}", UNITS[u])
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn is_eprint_paper_accepts_correct_tag() {
+        let tmp = tempfile_dir();
+        let meta = tmp.path().join("meta.json");
+        fs::write(&meta, r#"{"tool":"eprint","current_version":1}"#).unwrap();
+        assert!(is_eprint_paper(&meta));
+    }
+
+    #[test]
+    fn is_eprint_paper_rejects_missing_tag() {
+        let tmp = tempfile_dir();
+        let meta = tmp.path().join("meta.json");
+        fs::write(&meta, r#"{"current_version":1}"#).unwrap();
+        assert!(!is_eprint_paper(&meta));
+    }
+
+    #[test]
+    fn is_eprint_paper_rejects_wrong_tag() {
+        let tmp = tempfile_dir();
+        let meta = tmp.path().join("meta.json");
+        fs::write(&meta, r#"{"tool":"someone-else"}"#).unwrap();
+        assert!(!is_eprint_paper(&meta));
+    }
+
+    #[test]
+    fn is_eprint_paper_rejects_missing_file() {
+        let tmp = tempfile_dir();
+        let meta = tmp.path().join("meta.json"); // never written
+        assert!(!is_eprint_paper(&meta));
+    }
+
+    #[test]
+    fn is_eprint_paper_rejects_invalid_json() {
+        let tmp = tempfile_dir();
+        let meta = tmp.path().join("meta.json");
+        fs::write(&meta, "not json").unwrap();
+        assert!(!is_eprint_paper(&meta));
+    }
+
+    fn tempfile_dir() -> tempfile::TempDir {
+        tempfile::tempdir().expect("create tempdir")
+    }
+}

@@ -45,6 +45,13 @@ fn init_tracing(verbose: u8, format: cli::LogFormat) {
     // Precedence: -v / -vv / -vvv sets a default filter; RUST_LOG (if set)
     // *augments* it rather than replacing entirely. Lets users say
     // `-v RUST_LOG=papermd::local=trace` to opt in to module-level detail.
+    //
+    // EnvFilter resolves multiple directives for the same target by taking
+    // the most-specific match first, with ties broken by *last-added wins*.
+    // Since RUST_LOG entries are pushed after the default, an exact target
+    // match in RUST_LOG (e.g. `eprint=trace`) overrides the default
+    // (`eprint=warn`). More specific paths in RUST_LOG (e.g.
+    // `papermd::local=trace`) just refine the baseline further.
     let default_level = match verbose {
         0 => "warn",
         1 => "info",

@@ -31,6 +31,9 @@ dirs = "5"
 # Polite User-Agent + minimal HTML scraping for abstract/bibtex
 regex = "1"
 
+[dev-dependencies]
+tempfile = "3"
+
 [[bin]]
 name = "eprint"
 path = "src/main.rs"
