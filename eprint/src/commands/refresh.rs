@@ -41,9 +41,12 @@ pub async fn run(cx: &Context, args: RefreshArgs) -> Result<()> {
         .first()
         .ok_or_else(|| anyhow::anyhow!("OAI-PMH returned no record for {}", r.id))?;
 
-    let mut pm = cache::read_paper_meta(root, r.id).await;
-    let need_write = match pm.latest_known_oai_datestamp.as_deref() {
-        Some(existing) => oai::datestamp_cmp(existing, &rec.datestamp)?.is_lt(),
+    let existing = cache::read_paper_meta(root, r.id).await;
+    let need_write = match existing
+        .as_ref()
+        .and_then(|pm| pm.latest_known_oai_datestamp.as_deref())
+    {
+        Some(existing_ds) => oai::datestamp_cmp(existing_ds, &rec.datestamp)?.is_lt(),
         None => true,
     };
 
@@ -60,9 +63,15 @@ pub async fn run(cx: &Context, args: RefreshArgs) -> Result<()> {
     }
 
     if need_write {
-        pm.latest_known_oai_datestamp = Some(rec.datestamp.clone());
-        cache::write_paper_meta(root, r.id, &pm).await?;
-        info!(id = %r.id, datestamp = %rec.datestamp, "bumped latest_known_oai_datestamp");
+        // If existing meta was missing entirely (paper not yet fetched),
+        // the subsequent fetch_ref will create v1 and write fresh meta.
+        // Only bump latest_known_oai_datestamp here if we already have a
+        // meta to mutate.
+        if let Some(mut pm) = existing {
+            pm.latest_known_oai_datestamp = Some(rec.datestamp.clone());
+            cache::write_paper_meta(root, r.id, &pm).await?;
+            info!(id = %r.id, datestamp = %rec.datestamp, "bumped latest_known_oai_datestamp");
+        }
     }
 
     let report = fetch::fetch_ref(cx, PaperRef::current(r.id)).await?;

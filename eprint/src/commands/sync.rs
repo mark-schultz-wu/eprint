@@ -146,11 +146,12 @@ async fn sync_impl(
     let mut annotated = 0usize;
     let mut backfilled = 0usize;
     for rec in &records {
-        let dir = cache::paper_dir(root, rec.id);
-        if !dir.exists() {
+        // Skip records for papers we haven't fetched. read_paper_meta
+        // returning None either means the cache dir doesn't exist at all,
+        // or it exists but lacks a meta.json (not one of ours).
+        let Some(mut paper_meta) = cache::read_paper_meta(root, rec.id).await else {
             continue;
-        }
-        let mut paper_meta = cache::read_paper_meta(root, rec.id).await;
+        };
         let need_paper_write = match paper_meta.latest_known_oai_datestamp.as_deref() {
             Some(existing) => oai::datestamp_cmp(existing, &rec.datestamp)?.is_lt(),
             None => true,

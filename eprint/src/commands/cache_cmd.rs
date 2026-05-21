@@ -67,7 +67,11 @@ async fn list(cx: &Context) -> Result<()> {
         nums.sort_by_key(|(n, _)| *n);
         for (num, paper_dir) in nums {
             let id = crate::id::PaperId { year, num };
-            let pm = cache::read_paper_meta(root, id).await;
+            // Skip directories without one of our paper-meta files —
+            // matches `clear`'s positive-identification policy.
+            let Some(pm) = cache::read_paper_meta(root, id).await else {
+                continue;
+            };
             let versions = cache::existing_versions(root, id);
             let total_bytes = dir_size(&paper_dir);
             papers.push(CachedPaper {

@@ -37,20 +37,18 @@ pub async fn run(cx: &Context, args: ShowArgs) -> Result<()> {
     crate::commands::sync::maybe_auto_sync(cx).await?;
 
     let root = &cx.cfg.cache_root;
-    let paper_meta = cache::read_paper_meta(root, r.id).await;
-    let version = r.version.or(paper_meta.current_version).ok_or_else(|| {
+    let paper_meta = cache::read_paper_meta(root, r.id).await.ok_or_else(|| {
         anyhow::anyhow!(
             "{} is not in the cache; run `eprint fetch {}` first",
             r.id,
             r.id
         )
     })?;
+    let version = r.version.or(paper_meta.current_version).ok_or_else(|| {
+        anyhow::anyhow!("{} has no current_version recorded", r.id)
+    })?;
     let paths = cache::version_paths(root, r.id, version);
-    anyhow::ensure!(
-        paths.dir.exists(),
-        "{} v{version} not cached",
-        r.id
-    );
+    anyhow::ensure!(paths.dir.exists(), "{} v{version} not cached", r.id);
     let vmeta = cache::read_version_meta(root, r.id, version).await;
 
     let abstract_ = read_optional(&paths.abstract_).await;
@@ -60,7 +58,9 @@ pub async fn run(cx: &Context, args: ShowArgs) -> Result<()> {
         paper_meta.latest_known_oai_datestamp.as_deref(),
         vmeta.oai_datestamp.as_deref(),
     ) {
-        (Some(seen), Some(have)) => seen > have,
+        (Some(seen), Some(have)) => crate::oai::datestamp_cmp(seen, have)
+            .context("comparing cached vs latest OAI datestamps")?
+            .is_gt(),
         (Some(_), None) => true,
         _ => false,
     };

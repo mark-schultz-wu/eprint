@@ -39,14 +39,20 @@ pub mod files {
 pub const TOOL_TAG: &str = "eprint";
 
 /// Paper-level state. Lives at `<root>/<year>/<num>/meta.json`.
+///
+/// No `Default` impl: a `PaperMeta` should never exist except to describe
+/// an actually-fetched paper. Use [`PaperMeta::for_first_fetch`] when you
+/// know you're about to write `v1/` for a paper that wasn't on disk yet.
+/// For "read existing or report absent," use [`read_paper_meta`], which
+/// returns `Option<PaperMeta>`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaperMeta {
-    /// Tool that owns this directory; always `"eprint"` for us. Defaulted
-    /// when reading legacy meta.json that lacked the field.
-    #[serde(default = "default_tool_tag")]
+    /// Tool that owns this directory; always `"eprint"` for us.
     pub tool: String,
-    /// Which `vN` is the user-visible "latest" version. `None` until the
-    /// first version is written.
+    /// Which `vN` is the user-visible "latest" version. Never `None` for
+    /// a meta that's been written to disk by our code — kept as `Option`
+    /// so deserialisation of legacy / partially-written meta.json files
+    /// doesn't error out hard.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_version: Option<u32>,
     /// Most recent OAI-PMH datestamp seen by `eprint sync` (ISO 8601).
@@ -58,19 +64,18 @@ pub struct PaperMeta {
     pub title: Option<String>,
 }
 
-impl Default for PaperMeta {
-    fn default() -> Self {
+impl PaperMeta {
+    /// Construct a paper-level meta for a brand-new fetch, where we're
+    /// about to write `v{version}/` for this paper for the first time.
+    /// All other fields start as their natural empty state.
+    pub fn for_first_fetch(version: u32) -> Self {
         Self {
             tool: TOOL_TAG.into(),
-            current_version: None,
+            current_version: Some(version),
             latest_known_oai_datestamp: None,
             title: None,
         }
     }
-}
-
-fn default_tool_tag() -> String {
-    TOOL_TAG.into()
 }
 
 /// Per-version state. Lives at `<root>/<year>/<num>/vN/meta.json`.
@@ -128,14 +133,14 @@ pub fn version_paths(root: &Path, id: PaperId, version: u32) -> VersionPaths {
     }
 }
 
-/// Read the paper-level `meta.json`, returning a default if absent or
-/// malformed (cache is recoverable: we just lose freshness annotations).
-pub async fn read_paper_meta(root: &Path, id: PaperId) -> PaperMeta {
+/// Read the paper-level `meta.json`, returning `None` if the file is
+/// absent or unparseable. Callers must decide what to do when there's no
+/// existing meta — historically we silently defaulted, which let a `tool`
+/// tag leak onto unrelated directories.
+pub async fn read_paper_meta(root: &Path, id: PaperId) -> Option<PaperMeta> {
     let path = paper_meta_path(root, id);
-    match tokio::fs::read_to_string(&path).await {
-        Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
-        Err(_) => PaperMeta::default(),
-    }
+    let s = tokio::fs::read_to_string(&path).await.ok()?;
+    serde_json::from_str(&s).ok()
 }
 
 /// Write the paper-level `meta.json` atomically.

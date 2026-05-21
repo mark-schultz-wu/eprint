@@ -23,19 +23,21 @@ pub async fn run(cx: &Context, args: CheckArgs) -> Result<()> {
 
     let root = &cx.cfg.cache_root;
     let paper_meta = cache::read_paper_meta(root, r.id).await;
-    let version = r.version.or(paper_meta.current_version);
-    let in_cache = version.is_some() && cache::paper_dir(root, r.id).exists();
+    let in_cache = paper_meta.is_some();
+    let version = r.version.or_else(|| paper_meta.as_ref().and_then(|pm| pm.current_version));
 
     let vmeta = match version {
-        Some(v) => Some(cache::read_version_meta(root, r.id, v).await),
-        None => None,
+        Some(v) if in_cache => Some(cache::read_version_meta(root, r.id, v).await),
+        _ => None,
     };
     let cached_ds = vmeta.as_ref().and_then(|v| v.oai_datestamp.clone());
-    let stale = match (
-        paper_meta.latest_known_oai_datestamp.as_deref(),
-        cached_ds.as_deref(),
-    ) {
-        (Some(seen), Some(have)) => seen > have,
+    let latest_known = paper_meta
+        .as_ref()
+        .and_then(|pm| pm.latest_known_oai_datestamp.clone());
+    let stale = match (latest_known.as_deref(), cached_ds.as_deref()) {
+        (Some(seen), Some(have)) => crate::oai::datestamp_cmp(seen, have)
+            .context("comparing cached vs latest OAI datestamps")?
+            .is_gt(),
         (Some(_), None) if in_cache => true,
         _ => false,
     };
@@ -45,7 +47,7 @@ pub async fn run(cx: &Context, args: CheckArgs) -> Result<()> {
         version,
         in_cache,
         is_stale: stale,
-        latest_known_oai_datestamp: paper_meta.latest_known_oai_datestamp.clone(),
+        latest_known_oai_datestamp: latest_known,
         cached_oai_datestamp: cached_ds,
     };
 

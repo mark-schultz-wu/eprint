@@ -81,10 +81,13 @@ async fn fetch_current(cx: &Context, id: PaperId) -> Result<FetchReport> {
     let paper_meta = cache::read_paper_meta(root, id).await;
 
     // Decide what to do based on current cache state.
-    let action = decide_action(root, id, &paper_meta).await?;
+    let action = decide_action(root, id, paper_meta.as_ref()).await?;
 
     match action {
         Decision::CacheHit { version } => {
+            // CacheHit implies paper_meta exists (decide_action only returns
+            // CacheHit when there's a current version on disk).
+            let pm = paper_meta.expect("CacheHit implies PaperMeta present");
             let paths = cache::version_paths(root, id, version);
             Ok(FetchReport {
                 id: id.canonical(),
@@ -92,14 +95,17 @@ async fn fetch_current(cx: &Context, id: PaperId) -> Result<FetchReport> {
                 directory: paths.dir.display().to_string(),
                 bytes_downloaded: 0,
                 action: "cache-hit",
-                title: paper_meta.title,
+                title: pm.title,
             })
         }
         Decision::Download { version, action } => {
             if cx.offline {
                 anyhow::bail!("--offline set; would need to fetch {} v{version}", id);
             }
-            do_fetch(cx, id, version, paper_meta, action).await
+            // First-fetch path constructs a fresh meta; subsequent-version path
+            // reuses the existing one.
+            let pm = paper_meta.unwrap_or_else(|| PaperMeta::for_first_fetch(version));
+            do_fetch(cx, id, version, pm, action).await
         }
     }
 }
@@ -109,18 +115,26 @@ enum Decision {
     Download { version: u32, action: &'static str },
 }
 
-async fn decide_action(root: &Path, id: PaperId, paper_meta: &PaperMeta) -> Result<Decision> {
+async fn decide_action(
+    root: &Path,
+    id: PaperId,
+    paper_meta: Option<&PaperMeta>,
+) -> Result<Decision> {
     let versions = cache::existing_versions(root, id);
     if versions.is_empty() {
         return Ok(Decision::Download { version: 1, action: "first-fetch" });
     }
-    let current = paper_meta.current_version.unwrap_or_else(|| *versions.last().unwrap());
+    // With versions on disk we expect paper_meta to be present too; if it
+    // somehow isn't, treat the highest existing version as current.
+    let current = paper_meta
+        .and_then(|pm| pm.current_version)
+        .unwrap_or_else(|| *versions.last().unwrap());
     // Stale if sync has seen a newer OAI datestamp than the current version's.
     // A malformed datestamp (eprint schema change) is propagated rather than
     // swallowed — silently treating it as "fresh" would mask the bug.
     let version_meta = cache::read_version_meta(root, id, current).await;
     let stale = match (
-        paper_meta.latest_known_oai_datestamp.as_deref(),
+        paper_meta.and_then(|pm| pm.latest_known_oai_datestamp.as_deref()),
         version_meta.oai_datestamp.as_deref(),
     ) {
         (Some(seen), Some(cached)) => crate::oai::datestamp_cmp(seen, cached)
