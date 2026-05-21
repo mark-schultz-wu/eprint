@@ -9,9 +9,6 @@ use std::path::PathBuf;
 #[derive(Debug, Parser)]
 #[command(name = "eprint", version, about)]
 pub struct Cli {
-    /// Path to config file (default: $XDG_CONFIG_HOME/eprint/config.toml).
-    #[arg(long, global = true)]
-    pub config: Option<PathBuf>,
     /// Never make network requests; error if cache miss.
     #[arg(long, global = true)]
     pub offline: bool,
@@ -24,6 +21,12 @@ pub struct Cli {
     /// Log output format.
     #[arg(long, value_enum, default_value_t = LogFormat::Pretty, global = true)]
     pub log_format: LogFormat,
+    /// Run OAI-PMH sync if cache is stale (overrides `EPRINT_AUTO_SYNC`).
+    #[arg(long, global = true, env = "EPRINT_AUTO_SYNC", value_parser = clap::value_parser!(bool))]
+    pub auto_sync: Option<bool>,
+    /// Cache staleness threshold in hours (overrides `EPRINT_SYNC_STALE_HOURS`).
+    #[arg(long, global = true, env = "EPRINT_SYNC_STALE_HOURS")]
+    pub sync_stale_hours: Option<u32>,
     #[command(subcommand)]
     pub command: Command,
 }

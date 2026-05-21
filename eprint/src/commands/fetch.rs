@@ -38,12 +38,12 @@ pub async fn run(cx: &Context, args: FetchArgs) -> Result<()> {
 }
 
 pub async fn fetch_all(cx: &Context, id: PaperId) -> Result<FetchReport> {
-    let root = cx.cfg.cache_root();
-    let paths = cache::paths_for(&root, id);
+    let root = &cx.cfg.cache_root;
+    let paths = cache::paths_for(root, id);
     tokio::fs::create_dir_all(&paths.dir).await?;
 
     let client = net::client(cx.cfg.network.contact.as_deref())?;
-    let rl = RateLimiter::new(net::rate_limit_path(&root), cx.cfg.network.min_interval_s);
+    let rl = RateLimiter::new(net::rate_limit_path(root), cx.cfg.network.min_interval_s);
 
     let mut report = FetchReport {
         id: id.canonical(),

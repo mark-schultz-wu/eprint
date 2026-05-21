@@ -19,7 +19,13 @@ use tracing_subscriber::{prelude::*, EnvFilter};
 async fn main() -> Result<()> {
     let args = cli::Cli::parse();
     init_tracing(args.verbose, args.log_format);
-    let cfg = config::load(args.config.as_deref())?;
+    let mut cfg = config::Config::from_env();
+    if let Some(v) = args.auto_sync {
+        cfg.sync.auto = v;
+    }
+    if let Some(h) = args.sync_stale_hours {
+        cfg.sync.stale_after_hours = h;
+    }
     let cx = cli::Context { cfg, offline: args.offline, json: args.json };
     match args.command {
         cli::Command::Fetch(c) => commands::fetch::run(&cx, c).await,

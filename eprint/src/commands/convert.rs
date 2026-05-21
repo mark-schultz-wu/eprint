@@ -13,8 +13,7 @@ use tracing::info;
 pub async fn run(cx: &Context, args: ConvertArgs) -> Result<()> {
     let id: PaperId = args.id.parse().context("parsing paper id")?;
     let requested: Quality = args.quality.into();
-    let root = cx.cfg.cache_root();
-    let paths = cache::paths_for(&root, id);
+    let paths = cache::paths_for(&cx.cfg.cache_root, id);
 
     // Auto-fetch PDF if missing. Skips network if already cached.
     if !paths.pdf.exists() {
@@ -72,15 +71,16 @@ async fn convert_text(pdf_path: &Path) -> Result<papermd::Conversion> {
 
 /// ML-tier conversion, dispatching to the configured backend.
 async fn convert_ml(cx: &Context, pdf_path: &Path) -> Result<papermd::Conversion> {
-    let cfg = &cx.cfg.convert.ml;
-    match cfg.backend.as_str() {
-        "local" => {
+    use crate::config::BackendKind;
+    let cfg = &cx.cfg.ml;
+    match cfg.kind {
+        BackendKind::Local => {
             let conv = LocalConverter::default();
             Ok(conv.convert(pdf_path, Quality::Ml).await?)
         }
-        "remote" => {
+        BackendKind::Remote => {
             let endpoint = cfg.endpoint.as_deref().ok_or_else(|| {
-                anyhow::anyhow!("convert.ml.backend=\"remote\" requires convert.ml.endpoint")
+                anyhow::anyhow!("EPRINT_ML_BACKEND=remote requires EPRINT_ML_ENDPOINT")
             })?;
             let token = cfg
                 .token_env
@@ -92,7 +92,6 @@ async fn convert_ml(cx: &Context, pdf_path: &Path) -> Result<papermd::Conversion
             }
             Ok(conv.convert(pdf_path, Quality::Ml).await?)
         }
-        other => anyhow::bail!("unknown convert.ml.backend: {other:?} (expected \"local\" or \"remote\")"),
     }
 }
 
