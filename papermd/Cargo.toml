@@ -1,0 +1,25 @@
+[package]
+name = "papermd"
+version = "0.1.0"
+description = "Convert academic PDFs to Markdown, with math fidelity."
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[features]
+default = ["local"]
+local = ["dep:tempfile"]
+remote = ["dep:reqwest"]
+
+[dependencies]
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+bytes = { workspace = true }
+
+tempfile = { version = "3", optional = true }
+reqwest = { workspace = true, optional = true }
