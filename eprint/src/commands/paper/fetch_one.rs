@@ -74,7 +74,16 @@ pub async fn ensure_version(
     if need_landing {
         let html = net::get_text(&client, &rl, &id.html_url()).await?;
         report.bytes_downloaded += html.len() as u64;
-        let landing = scrape::parse(&html);
+        // Demote scrape failures to a warning: the PDF is already on
+        // disk; missing metadata is recoverable on a future fetch
+        // (or via an updated regex set).
+        let landing = match scrape::parse(&html) {
+            Ok(l) => l,
+            Err(e) => {
+                warn!(error = %e, "could not parse landing page; continuing without title/bib/abstract");
+                scrape::Landing::default()
+            }
+        };
 
         if is_current {
             if let Some(bib) = &landing.bibtex {
