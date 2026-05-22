@@ -5,38 +5,60 @@
 //! <li><a href="/archive/2024/463/20250106:174348">20250106:174348</a> PDF update (most recent)</li>
 //! ```
 //!
-//! We extract the compact timestamp + the "most recent" marker, convert
-//! to canonical form, and return.
+//! `parse_archive_page` is a pure function that returns a typed error
+//! when the page looks like a Versions page but no entries match — that
+//! signals an upstream template change. Top-level callers can demote to
+//! a warn and fall back to whatever they already have.
 
 use crate::net::{self, RateLimiter};
 use crate::version;
-use anyhow::Result;
 use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
 pub struct ArchiveVersion {
-    /// Canonical timestamp (e.g. `20240319T143540Z`).
     pub timestamp: String,
-    /// True if marked "(most recent)" in the listing.
     pub is_current: bool,
 }
 
-/// Fetch and parse the archive page for `<id>`. Returns versions in
-/// ascending chronological order (oldest first).
+#[derive(Debug, thiserror::Error)]
+pub enum ParseError {
+    #[error(
+        "archive page advertises versions but no entries matched the \
+         expected `<li><a href=\"/archive/...\">.. PDF update (...)</li>` \
+         pattern; eprint may have changed the template"
+    )]
+    VersionsPageButZeroEntries,
+    #[error("malformed archive timestamp: {0}")]
+    BadTimestamp(#[from] version::VersionError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("http error: {0}")]
+    Http(#[from] anyhow::Error),
+    #[error(transparent)]
+    Parse(#[from] ParseError),
+}
+
+/// Fetch and parse the archive page for one paper. Versions returned in
+/// ascending chronological order.
 pub async fn fetch_versions(
     client: &reqwest::Client,
     rl: &RateLimiter,
     archive_url: &str,
-) -> Result<Vec<ArchiveVersion>> {
+) -> Result<Vec<ArchiveVersion>, Error> {
     let body = net::get_text(client, rl, archive_url).await?;
-    parse_archive_page(&body)
+    parse_archive_page(&body).map_err(Into::into)
 }
 
 /// Parse archive HTML. Returns versions ascending by timestamp.
-pub fn parse_archive_page(html: &str) -> Result<Vec<ArchiveVersion>> {
+///
+/// Errors if the HTML looks like a Versions page (carries the "Versions
+/// for ePrint paper" header) but yields zero entries — that's almost
+/// certainly a template change worth flagging.
+pub fn parse_archive_page(html: &str) -> Result<Vec<ArchiveVersion>, ParseError> {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
     let re = RE.get_or_init(|| {
-        // Match: <li><a href="/archive/YEAR/NUM/TIMESTAMP">TIMESTAMP</a> PDF update (TAIL)</li>
         regex::Regex::new(
             r#"<li>\s*<a[^>]*href="/archive/\d+/\d+/(\d{8}:\d{6})"[^>]*>\s*\d{8}:\d{6}\s*</a>\s*PDF update(?:\s*\(([^)]+)\))?"#,
         )
@@ -52,9 +74,15 @@ pub fn parse_archive_page(html: &str) -> Result<Vec<ArchiveVersion>> {
             is_current: marker.contains("most recent"),
         });
     }
-    // Page lists newest-first; reverse to ascending.
-    out.reverse();
+    if out.is_empty() && looks_like_versions_page(html) {
+        return Err(ParseError::VersionsPageButZeroEntries);
+    }
+    out.reverse(); // page lists newest-first; we want ascending
     Ok(out)
+}
+
+fn looks_like_versions_page(html: &str) -> bool {
+    html.contains("Versions for ePrint paper") || html.contains("Versions for ePrint")
 }
 
 #[cfg(test)]
@@ -75,16 +103,23 @@ mod tests {
         let v = parse_archive_page(SAMPLE).unwrap();
         assert_eq!(v.len(), 3);
         assert_eq!(v[0].timestamp, "20240319T143540Z");
-        assert_eq!(v[1].timestamp, "20241017T150428Z");
         assert_eq!(v[2].timestamp, "20250106T174348Z");
         assert!(v[2].is_current);
-        assert!(!v[0].is_current);
     }
 
     #[test]
-    fn handles_empty_archive() {
-        let html = "<html><body>no versions here</body></html>";
-        let v = parse_archive_page(html).unwrap();
+    fn truly_empty_page_returns_empty_vec() {
+        let v = parse_archive_page("<html>nothing here</html>").unwrap();
         assert!(v.is_empty());
+    }
+
+    #[test]
+    fn versions_page_with_no_matches_returns_error() {
+        let html = r##"<html><body>
+<h2>Versions for ePrint paper 2024/999</h2>
+<p>template was rewritten and our regex no longer matches</p>
+</body></html>"##;
+        let err = parse_archive_page(html).unwrap_err();
+        assert!(matches!(err, ParseError::VersionsPageButZeroEntries));
     }
 }

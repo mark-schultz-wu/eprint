@@ -22,6 +22,20 @@ impl PaperId {
         format!("https://eprint.iacr.org/archive/versions/{}/{}", self.year, self.num)
     }
 
+    /// URL for a specific historical version's PDF, using eprint's
+    /// `/archive/<year>/<num>/<unix-seconds>.pdf` form.
+    /// `canonical_version` must be canonical form (`YYYYMMDDTHHMMSSZ`).
+    pub fn historical_pdf_url(
+        &self,
+        canonical_version: &str,
+    ) -> Result<String, crate::version::VersionError> {
+        let unix = crate::version::to_unix(canonical_version)?;
+        Ok(format!(
+            "https://eprint.iacr.org/archive/{}/{}/{}.pdf",
+            self.year, self.num, unix
+        ))
+    }
+
     pub fn canonical(&self) -> String {
         format!("{}/{}", self.year, self.num)
     }
