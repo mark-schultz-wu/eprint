@@ -16,7 +16,7 @@ use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
 pub struct ArchiveVersion {
-    pub timestamp: String,
+    pub timestamp: version::Canonical,
     pub is_current: bool,
 }
 
@@ -66,8 +66,9 @@ pub fn parse_archive_page(html: &str) -> Result<Vec<ArchiveVersion>, ParseError>
     });
     let mut out = Vec::new();
     for caps in re.captures_iter(html) {
-        let compact = caps.get(1).unwrap().as_str();
-        let canonical = version::from_compact(compact)?;
+        let compact_str = caps.get(1).unwrap().as_str();
+        let compact: version::ArchiveCompact = compact_str.parse()?;
+        let canonical: version::Canonical = (&compact).into();
         let marker = caps.get(2).map(|m| m.as_str()).unwrap_or("");
         out.push(ArchiveVersion {
             timestamp: canonical,
@@ -102,8 +103,8 @@ mod tests {
     fn parses_three_versions_ascending() {
         let v = parse_archive_page(SAMPLE).unwrap();
         assert_eq!(v.len(), 3);
-        assert_eq!(v[0].timestamp, "20240319T143540Z");
-        assert_eq!(v[2].timestamp, "20250106T174348Z");
+        assert_eq!(v[0].timestamp.as_str(), "20240319T143540Z");
+        assert_eq!(v[2].timestamp.as_str(), "20250106T174348Z");
         assert!(v[2].is_current);
     }
 

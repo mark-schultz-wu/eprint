@@ -5,6 +5,7 @@
 use crate::cache;
 use crate::cli::Context;
 use crate::id::PaperId;
+use crate::version::Canonical;
 use crate::commands::paper::PaperReport;
 use anyhow::{Context as _, Result};
 use papermd::{Converter, LocalConverter, Quality, RemoteConverter};
@@ -13,7 +14,7 @@ use tracing::info;
 pub async fn maybe_run(
     cx: &Context,
     id: PaperId,
-    version: &str,
+    version: &Canonical,
     quality: Quality,
     report: &mut PaperReport,
 ) -> Result<()> {
@@ -22,7 +23,7 @@ pub async fn maybe_run(
     let vmeta = cache::read_version_meta(root, id, version).await;
     let cached_q = parse_quality(vmeta.md_quality.as_deref());
     if paths.md.exists() && quality_at_least(cached_q, quality) {
-        info!(id = %id, version, quality = ?cached_q, "markdown already cached at requested quality");
+        info!(id = %id, version = %version, quality = ?cached_q, "markdown already cached at requested quality");
         return Ok(());
     }
     let markdown = match quality {

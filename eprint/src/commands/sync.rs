@@ -106,7 +106,8 @@ async fn sync_impl(
         let Some(mut paper_meta) = cache::read_paper_meta(root, rec.id).await else {
             continue;
         };
-        let canonical = version::from_oai(&rec.datestamp)?;
+        let oai: version::OaiDatestamp = rec.datestamp.parse()?;
+        let canonical: version::Canonical = (&oai).into();
         if !paper_meta.known_versions.contains(&canonical) {
             paper_meta.known_versions.push(canonical);
             paper_meta.known_versions.sort();

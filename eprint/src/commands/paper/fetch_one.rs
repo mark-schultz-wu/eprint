@@ -8,6 +8,7 @@ use crate::cli::Context;
 use crate::id::PaperId;
 use crate::net;
 use crate::scrape;
+use crate::version::Canonical;
 use crate::commands::paper::PaperReport;
 use anyhow::Result;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,7 +19,7 @@ use tracing::warn;
 pub async fn ensure_version(
     cx: &Context,
     id: PaperId,
-    version: &str,
+    version: &Canonical,
     paper_meta: Option<&mut PaperMeta>,
     report: &mut PaperReport,
 ) -> Result<()> {
@@ -39,12 +40,12 @@ pub async fn ensure_version(
     // version; older versions live at /archive/<id>/<unix>.pdf.
     let is_current = paper_meta
         .as_deref()
-        .and_then(|p| p.current_version.as_deref())
+        .and_then(|p| p.current_version.as_ref())
         == Some(version);
     let pdf_url = if is_current {
         id.pdf_url()
     } else {
-        id.historical_pdf_url(version)?
+        id.historical_pdf_url(version)
     };
 
     let pdf_bytes = net::get_bytes(&client, &rl, &pdf_url).await?;
@@ -95,7 +96,7 @@ pub async fn ensure_version(
             }
             cache::write_paper_meta(root, id, pm).await?;
         } else {
-            let mut pm = PaperMeta::for_first_fetch(version);
+            let mut pm = PaperMeta::for_first_fetch(version.clone());
             pm.title = landing.title.clone();
             cache::write_paper_meta(root, id, &pm).await?;
         }

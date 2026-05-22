@@ -6,28 +6,27 @@
 use crate::cache::{self, PaperMeta};
 use crate::cli::{Context, PaperArgs};
 use crate::id::PaperId;
-use crate::version;
-use anyhow::Result;
+use crate::version::Canonical;
+use anyhow::{Context as _, Result};
 
 pub async fn target_version(
     cx: &Context,
     id: PaperId,
     paper_meta: Option<&PaperMeta>,
     args: &PaperArgs,
-) -> Result<Option<String>> {
+) -> Result<Option<Canonical>> {
     if let Some(v) = &args.version {
-        anyhow::ensure!(
-            version::is_canonical(v),
-            "--version expects canonical timestamp YYYYMMDDTHHMMSSZ, got {v:?}"
-        );
-        return Ok(Some(v.clone()));
+        let parsed: Canonical = v
+            .parse()
+            .with_context(|| format!("--version {v:?} is not canonical timestamp YYYYMMDDTHHMMSSZ"))?;
+        return Ok(Some(parsed));
     }
     if args.select_version {
         anyhow::ensure!(
             !cx.json,
             "--select-version is interactive; incompatible with --json"
         );
-        let versions: Vec<String> = paper_meta
+        let versions: Vec<Canonical> = paper_meta
             .map(|p| p.known_versions.clone())
             .unwrap_or_default();
         anyhow::ensure!(
@@ -45,9 +44,9 @@ pub async fn target_version(
     Ok(paper_meta.and_then(|p| p.current_version.clone()))
 }
 
-fn label_for(cx: &Context, id: PaperId, paper_meta: Option<&PaperMeta>, v: &str) -> String {
+fn label_for(cx: &Context, id: PaperId, paper_meta: Option<&PaperMeta>, v: &Canonical) -> String {
     let is_current = paper_meta
-        .and_then(|p| p.current_version.as_deref())
+        .and_then(|p| p.current_version.as_ref())
         .map(|c| c == v)
         .unwrap_or(false);
     let is_cached = cache::version_dir(&cx.cfg.cache_root, id, v).exists();
@@ -55,7 +54,7 @@ fn label_for(cx: &Context, id: PaperId, paper_meta: Option<&PaperMeta>, v: &str)
     if is_current { tags.push("current"); }
     if is_cached { tags.push("cached"); }
     if tags.is_empty() {
-        v.to_owned()
+        v.to_string()
     } else {
         format!("{v}   ({})", tags.join(", "))
     }

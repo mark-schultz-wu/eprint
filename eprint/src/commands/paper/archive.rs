@@ -18,7 +18,8 @@ pub async fn refresh_known_versions(
 ) -> Result<PaperMeta> {
     let client = net::client(cx.cfg.network.contact.as_deref())?;
     let versions = archive::fetch_versions(&client, &cx.rate_limiter, &id.archive_url()).await?;
-    let canonical_list: Vec<String> = versions.iter().map(|v| v.timestamp.clone()).collect();
+    let canonical_list: Vec<crate::version::Canonical> =
+        versions.iter().map(|v| v.timestamp.clone()).collect();
     let current = versions.iter().find(|v| v.is_current).map(|v| v.timestamp.clone());
 
     let new_meta = match existing {

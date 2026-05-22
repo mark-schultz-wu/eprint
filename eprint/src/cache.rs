@@ -43,14 +43,12 @@ pub struct PaperMeta {
     /// Tool identifier; always `"eprint"`.
     pub tool: String,
     /// Canonical timestamp of the version the tool treats as current.
-    /// Always set once at least one version has been written.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_version: Option<String>,
+    pub current_version: Option<version::Canonical>,
     /// All version timestamps the tool knows about (cached or not),
-    /// canonical-form, ascending order. Populated from `archive` scrape
-    /// + augmented by sync.
+    /// ascending order. Populated from archive scrape + augmented by sync.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub known_versions: Vec<String>,
+    pub known_versions: Vec<version::Canonical>,
     /// Paper title from the landing page.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
@@ -59,11 +57,11 @@ pub struct PaperMeta {
 impl PaperMeta {
     /// Construct a paper-level meta for a brand-new fetch, where we're
     /// about to write `<version>/` for this paper for the first time.
-    pub fn for_first_fetch(version: &str) -> Self {
+    pub fn for_first_fetch(version: version::Canonical) -> Self {
         Self {
             tool: TOOL_TAG.into(),
-            current_version: Some(version.to_owned()),
-            known_versions: vec![version.to_owned()],
+            current_version: Some(version.clone()),
+            known_versions: vec![version],
             title: None,
         }
     }
@@ -86,8 +84,8 @@ pub fn paper_dir(root: &Path, id: PaperId) -> PathBuf {
     root.join(id.cache_subdir())
 }
 
-pub fn version_dir(root: &Path, id: PaperId, version: &str) -> PathBuf {
-    paper_dir(root, id).join(version)
+pub fn version_dir(root: &Path, id: PaperId, version: &version::Canonical) -> PathBuf {
+    paper_dir(root, id).join(version.as_str())
 }
 
 pub fn paper_meta_path(root: &Path, id: PaperId) -> PathBuf {
@@ -103,7 +101,7 @@ pub struct VersionPaths {
     pub meta: PathBuf,
 }
 
-pub fn version_paths(root: &Path, id: PaperId, version: &str) -> VersionPaths {
+pub fn version_paths(root: &Path, id: PaperId, version: &version::Canonical) -> VersionPaths {
     let dir = version_dir(root, id, version);
     VersionPaths {
         pdf: dir.join(files::PDF),
@@ -130,7 +128,11 @@ pub async fn write_paper_meta(root: &Path, id: PaperId, meta: &PaperMeta) -> std
     tokio::fs::write(path, bytes).await
 }
 
-pub async fn read_version_meta(root: &Path, id: PaperId, version: &str) -> VersionMeta {
+pub async fn read_version_meta(
+    root: &Path,
+    id: PaperId,
+    version: &version::Canonical,
+) -> VersionMeta {
     let path = version_paths(root, id, version).meta;
     match tokio::fs::read_to_string(&path).await {
         Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
@@ -141,7 +143,7 @@ pub async fn read_version_meta(root: &Path, id: PaperId, version: &str) -> Versi
 pub async fn write_version_meta(
     root: &Path,
     id: PaperId,
-    version: &str,
+    version: &version::Canonical,
     meta: &VersionMeta,
 ) -> std::io::Result<()> {
     let paths = version_paths(root, id, version);
@@ -152,18 +154,14 @@ pub async fn write_version_meta(
 }
 
 /// Enumerate version subdirectories present on disk, sorted ascending.
-pub fn existing_versions(root: &Path, id: PaperId) -> Vec<String> {
+pub fn existing_versions(root: &Path, id: PaperId) -> Vec<version::Canonical> {
     let dir = paper_dir(root, id);
-    let mut out: Vec<String> = match std::fs::read_dir(&dir) {
+    let mut out: Vec<version::Canonical> = match std::fs::read_dir(&dir) {
         Ok(rd) => rd
             .flatten()
             .filter_map(|e| {
                 let name = e.file_name().to_string_lossy().into_owned();
-                if version::is_canonical(&name) {
-                    Some(name)
-                } else {
-                    None
-                }
+                name.parse::<version::Canonical>().ok()
             })
             .collect(),
         Err(_) => Vec::new(),
