@@ -1,11 +1,6 @@
-//! Subcommand handlers. Each module exposes a single `run` async fn taking
-//! `(&Context, <SubcommandArgs>) -> anyhow::Result<()>`.
+//! Subcommand handlers.
 
 pub mod cache_cmd;
-pub mod check;
-pub mod convert;
 pub mod feed;
-pub mod fetch;
-pub mod refresh;
-pub mod show;
+pub mod paper;
 pub mod sync;

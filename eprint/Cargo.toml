@@ -23,6 +23,9 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 quick-xml = { workspace = true }
 
+# Interactive picker for --select-version
+dialoguer = "0.11"
+
 # Pure-Rust text-only extraction
 pdf-extract = "0.10"
 

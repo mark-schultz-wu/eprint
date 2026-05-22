@@ -1,29 +1,28 @@
-//! Versioned per-paper cache layout.
+//! Per-paper cache layout, keyed on eprint's version timestamps.
 //!
 //! ```text
 //! <cache_root>/
 //!   2024/
 //!     0463/
 //!       meta.json                  # PaperMeta
-//!       v1/
+//!       20250106T174348Z/          # one dir per known version
 //!         meta.json                # VersionMeta
 //!         paper.pdf
-//!         paper.md                 # written by `eprint convert`
+//!         paper.md
 //!         paper.bib
 //!         abstract.txt
-//!       v2/                        # added when sync sees a newer OAI datestamp
+//!       20240319T143540Z/
 //!         ...
 //! ```
 //!
-//! Versions are integer-numbered. The paper-level `meta.json` records
-//! which version is *current* and the most recent OAI-PMH datestamp the
-//! tool has seen for this paper (filled by sync, not by fetch).
+//! Version directory names use the canonical form from `crate::version`
+//! (filesystem-friendly basic ISO 8601 UTC).
 
 use crate::id::PaperId;
+use crate::version;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-/// File names within a `vN/` directory.
 pub mod files {
     pub const PDF: &str = "paper.pdf";
     pub const MD: &str = "paper.md";
@@ -34,84 +33,67 @@ pub mod files {
 }
 
 /// Magic field embedded in every paper-level `meta.json` so destructive
-/// operations (e.g. `eprint cache clear`) can positively identify that a
-/// directory is one of our cache entries before recursively deleting it.
+/// operations can positively identify our cache entries.
 pub const TOOL_TAG: &str = "eprint";
 
-/// Paper-level state. Lives at `<root>/<year>/<num>/meta.json`.
-///
-/// No `Default` impl: a `PaperMeta` should never exist except to describe
-/// an actually-fetched paper. Use [`PaperMeta::for_first_fetch`] when you
-/// know you're about to write `v1/` for a paper that wasn't on disk yet.
-/// For "read existing or report absent," use [`read_paper_meta`], which
-/// returns `Option<PaperMeta>`.
+/// Paper-level state. Lives at `<root>/<year>/<num>/meta.json`. Has no
+/// `Default` impl by design — see [`PaperMeta::for_first_fetch`].
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaperMeta {
-    /// Tool that owns this directory; always `"eprint"` for us.
+    /// Tool identifier; always `"eprint"`.
     pub tool: String,
-    /// Which `vN` is the user-visible "latest" version. Never `None` for
-    /// a meta that's been written to disk by our code — kept as `Option`
-    /// so deserialisation of legacy / partially-written meta.json files
-    /// doesn't error out hard.
+    /// Canonical timestamp of the version the tool treats as current.
+    /// Always set once at least one version has been written.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub current_version: Option<u32>,
-    /// Most recent OAI-PMH datestamp seen by `eprint sync` (ISO 8601).
-    /// `None` if sync has never observed this paper.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub latest_known_oai_datestamp: Option<String>,
-    /// Paper title from the landing page (best-effort).
+    pub current_version: Option<String>,
+    /// All version timestamps the tool knows about (cached or not),
+    /// canonical-form, ascending order. Populated from `archive` scrape
+    /// + augmented by sync.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub known_versions: Vec<String>,
+    /// Paper title from the landing page.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
 }
 
 impl PaperMeta {
     /// Construct a paper-level meta for a brand-new fetch, where we're
-    /// about to write `v{version}/` for this paper for the first time.
-    /// All other fields start as their natural empty state.
-    pub fn for_first_fetch(version: u32) -> Self {
+    /// about to write `<version>/` for this paper for the first time.
+    pub fn for_first_fetch(version: &str) -> Self {
         Self {
             tool: TOOL_TAG.into(),
-            current_version: Some(version),
-            latest_known_oai_datestamp: None,
+            current_version: Some(version.to_owned()),
+            known_versions: vec![version.to_owned()],
             title: None,
         }
     }
 }
 
-/// Per-version state. Lives at `<root>/<year>/<num>/vN/meta.json`.
+/// Per-version state. Lives at `<root>/<year>/<num>/<version>/meta.json`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VersionMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fetched_unix_s: Option<i64>,
-    /// OAI-PMH datestamp this version corresponds to (filled by sync when
-    /// the version is first observed; null for versions that were created
-    /// by direct fetch without ever being seen by sync).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub oai_datestamp: Option<String>,
     /// "text" or "ml"; `None` if `paper.md` hasn't been generated.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub md_quality: Option<String>,
-    /// MinerU version used to produce `paper.md`, only set when md_quality == "ml".
+    /// MinerU version used to produce `paper.md`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mineru_version: Option<String>,
 }
 
-/// `<root>/<year>/<num>/`.
 pub fn paper_dir(root: &Path, id: PaperId) -> PathBuf {
     root.join(id.cache_subdir())
 }
 
-/// `<root>/<year>/<num>/vN/`.
-pub fn version_dir(root: &Path, id: PaperId, version: u32) -> PathBuf {
-    paper_dir(root, id).join(format!("v{version}"))
+pub fn version_dir(root: &Path, id: PaperId, version: &str) -> PathBuf {
+    paper_dir(root, id).join(version)
 }
 
-/// `<root>/<year>/<num>/meta.json`.
 pub fn paper_meta_path(root: &Path, id: PaperId) -> PathBuf {
     paper_dir(root, id).join(files::PAPER_META)
 }
 
-/// All on-disk paths inside one version directory.
 pub struct VersionPaths {
     pub dir: PathBuf,
     pub pdf: PathBuf,
@@ -121,7 +103,7 @@ pub struct VersionPaths {
     pub meta: PathBuf,
 }
 
-pub fn version_paths(root: &Path, id: PaperId, version: u32) -> VersionPaths {
+pub fn version_paths(root: &Path, id: PaperId, version: &str) -> VersionPaths {
     let dir = version_dir(root, id, version);
     VersionPaths {
         pdf: dir.join(files::PDF),
@@ -133,17 +115,12 @@ pub fn version_paths(root: &Path, id: PaperId, version: u32) -> VersionPaths {
     }
 }
 
-/// Read the paper-level `meta.json`, returning `None` if the file is
-/// absent or unparseable. Callers must decide what to do when there's no
-/// existing meta — historically we silently defaulted, which let a `tool`
-/// tag leak onto unrelated directories.
 pub async fn read_paper_meta(root: &Path, id: PaperId) -> Option<PaperMeta> {
     let path = paper_meta_path(root, id);
     let s = tokio::fs::read_to_string(&path).await.ok()?;
     serde_json::from_str(&s).ok()
 }
 
-/// Write the paper-level `meta.json` atomically.
 pub async fn write_paper_meta(root: &Path, id: PaperId, meta: &PaperMeta) -> std::io::Result<()> {
     let dir = paper_dir(root, id);
     tokio::fs::create_dir_all(&dir).await?;
@@ -153,7 +130,7 @@ pub async fn write_paper_meta(root: &Path, id: PaperId, meta: &PaperMeta) -> std
     tokio::fs::write(path, bytes).await
 }
 
-pub async fn read_version_meta(root: &Path, id: PaperId, version: u32) -> VersionMeta {
+pub async fn read_version_meta(root: &Path, id: PaperId, version: &str) -> VersionMeta {
     let path = version_paths(root, id, version).meta;
     match tokio::fs::read_to_string(&path).await {
         Ok(s) => serde_json::from_str(&s).unwrap_or_default(),
@@ -164,7 +141,7 @@ pub async fn read_version_meta(root: &Path, id: PaperId, version: u32) -> Versio
 pub async fn write_version_meta(
     root: &Path,
     id: PaperId,
-    version: u32,
+    version: &str,
     meta: &VersionMeta,
 ) -> std::io::Result<()> {
     let paths = version_paths(root, id, version);
@@ -174,16 +151,19 @@ pub async fn write_version_meta(
     tokio::fs::write(paths.meta, bytes).await
 }
 
-/// Enumerate `vN` subdirectories present on disk, sorted ascending by N.
-pub fn existing_versions(root: &Path, id: PaperId) -> Vec<u32> {
+/// Enumerate version subdirectories present on disk, sorted ascending.
+pub fn existing_versions(root: &Path, id: PaperId) -> Vec<String> {
     let dir = paper_dir(root, id);
-    let mut out: Vec<u32> = match std::fs::read_dir(&dir) {
+    let mut out: Vec<String> = match std::fs::read_dir(&dir) {
         Ok(rd) => rd
             .flatten()
             .filter_map(|e| {
-                let name = e.file_name();
-                let s = name.to_str()?;
-                s.strip_prefix('v').and_then(|n| n.parse::<u32>().ok())
+                let name = e.file_name().to_string_lossy().into_owned();
+                if version::is_canonical(&name) {
+                    Some(name)
+                } else {
+                    None
+                }
             })
             .collect(),
         Err(_) => Vec::new(),
@@ -191,4 +171,3 @@ pub fn existing_versions(root: &Path, id: PaperId) -> Vec<u32> {
     out.sort_unstable();
     out
 }
-

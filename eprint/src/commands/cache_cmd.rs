@@ -20,8 +20,8 @@ pub async fn run(cx: &Context, args: CacheArgs) -> Result<()> {
 #[derive(Debug, Serialize)]
 struct CachedPaper {
     id: String,
-    current_version: Option<u32>,
-    versions: Vec<u32>,
+    current_version: Option<String>,
+    versions: Vec<String>,
     total_bytes: u64,
 }
 
@@ -91,15 +91,10 @@ async fn list(cx: &Context) -> Result<()> {
         println!("{} papers in {}", papers.len(), root.display());
         let mut total = 0u64;
         for p in &papers {
-            let v_str = if p.versions.len() <= 1 {
-                p.current_version.map(|v| format!("v{v}")).unwrap_or_else(|| "?".into())
-            } else {
-                format!(
-                    "v1..v{} ({} versions, current v{})",
-                    p.versions.last().unwrap(),
-                    p.versions.len(),
-                    p.current_version.unwrap_or(0),
-                )
+            let v_str = match (p.current_version.as_deref(), p.versions.len()) {
+                (Some(cv), 1) => cv.to_string(),
+                (Some(cv), n) => format!("{cv} ({} cached versions)", n),
+                (None, _) => "?".into(),
             };
             println!("  {}  {:>10}  {}", p.id, fmt_bytes(p.total_bytes), v_str);
             total += p.total_bytes;
