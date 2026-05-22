@@ -56,23 +56,39 @@ pub async fn ensure_version(
     tokio::fs::write(&paths.pdf, &pdf_bytes).await?;
     report.bytes_downloaded += pdf_bytes.len() as u64;
 
-    // Only the current version's landing page carries the canonical title
-    // / abstract / bibtex; historical versions just have a "see latest"
-    // notice. So only scrape on is_current.
-    if is_current {
+    // Scrape the landing page when:
+    //   * We're fetching the current version (canonical bib/abstract for
+    //     this version live there), OR
+    //   * We don't yet have a title on file (any landing-page visit will
+    //     yield one, even when we're pulling a historical PDF).
+    //
+    // The landing page at /<id> always describes the *current* version,
+    // so for historical fetches we save the title (shared across versions)
+    // but NOT the bib/abstract (which would mislabel the historical dir).
+    let have_title = paper_meta
+        .as_deref()
+        .and_then(|p| p.title.as_deref())
+        .is_some();
+    let need_landing = is_current || !have_title;
+    if need_landing {
         let html = net::get_text(&client, &rl, &id.html_url()).await?;
         report.bytes_downloaded += html.len() as u64;
         let landing = scrape::parse(&html);
-        if let Some(bib) = &landing.bibtex {
-            tokio::fs::write(&paths.bib, bib).await?;
-        } else {
-            warn!("could not scrape BibTeX");
+
+        if is_current {
+            if let Some(bib) = &landing.bibtex {
+                tokio::fs::write(&paths.bib, bib).await?;
+            } else {
+                warn!("could not scrape BibTeX");
+            }
+            if let Some(abs) = &landing.abstract_ {
+                tokio::fs::write(&paths.abstract_, abs).await?;
+            } else {
+                warn!("could not scrape abstract");
+            }
         }
-        if let Some(abs) = &landing.abstract_ {
-            tokio::fs::write(&paths.abstract_, abs).await?;
-        } else {
-            warn!("could not scrape abstract");
-        }
+
+        // Title goes in paper_meta regardless of version (it's shared).
         if let Some(pm) = paper_meta {
             if landing.title.is_some() {
                 pm.title = landing.title.clone();
