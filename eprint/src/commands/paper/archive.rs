@@ -6,7 +6,7 @@ use crate::archive;
 use crate::cache::{self, PaperMeta, TOOL_TAG};
 use crate::cli::Context;
 use crate::id::PaperId;
-use crate::net::{self, RateLimiter};
+use crate::net;
 use anyhow::Result;
 
 /// Fetch the archive listing for `id` and merge into a fresh `PaperMeta`.
@@ -17,8 +17,7 @@ pub async fn refresh_known_versions(
     existing: Option<PaperMeta>,
 ) -> Result<PaperMeta> {
     let client = net::client(cx.cfg.network.contact.as_deref())?;
-    let rl = RateLimiter::new(net::rate_limit_path(&cx.cfg.cache_root), cx.cfg.network.min_interval_s);
-    let versions = archive::fetch_versions(&client, &rl, &id.archive_url()).await?;
+    let versions = archive::fetch_versions(&client, &cx.rate_limiter, &id.archive_url()).await?;
     let canonical_list: Vec<String> = versions.iter().map(|v| v.timestamp.clone()).collect();
     let current = versions.iter().find(|v| v.is_current).map(|v| v.timestamp.clone());
 

@@ -21,6 +21,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process
 async-trait = "0.1"
 bytes = "1"
 quick-xml = "0.36"
+governor = "0.6"
 
 [profile.release]
 opt-level = 3

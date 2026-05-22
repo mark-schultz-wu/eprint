@@ -6,7 +6,7 @@
 use crate::cache::{self, PaperMeta, VersionMeta};
 use crate::cli::Context;
 use crate::id::PaperId;
-use crate::net::{self, RateLimiter};
+use crate::net;
 use crate::scrape;
 use crate::commands::paper::PaperReport;
 use anyhow::Result;
@@ -33,7 +33,7 @@ pub async fn ensure_version(
 
     tokio::fs::create_dir_all(&paths.dir).await?;
     let client = net::client(cx.cfg.network.contact.as_deref())?;
-    let rl = RateLimiter::new(net::rate_limit_path(root), cx.cfg.network.min_interval_s);
+    let rl = &*cx.rate_limiter;
 
     // Decide which URL to hit. The canonical /<id>.pdf serves the current
     // version; older versions live at /archive/<id>/<unix>.pdf.

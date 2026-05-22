@@ -27,7 +27,8 @@ async fn main() -> Result<()> {
     if let Some(h) = args.sync_stale_hours {
         cfg.sync.stale_after_hours = h;
     }
-    let cx = cli::Context { cfg, offline: args.offline, json: args.json };
+    let rate_limiter = net::rate_limiter(cfg.network.min_interval_s, 3);
+    let cx = cli::Context { cfg, offline: args.offline, json: args.json, rate_limiter };
     match args.command {
         cli::Command::Paper(c) => commands::paper::run(&cx, c).await,
         cli::Command::Sync(c) => commands::sync::run(&cx, c).await,

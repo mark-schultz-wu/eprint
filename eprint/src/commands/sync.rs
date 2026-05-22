@@ -10,7 +10,7 @@
 
 use crate::cache;
 use crate::cli::{Context, SyncArgs};
-use crate::net::{self, RateLimiter};
+use crate::net;
 use crate::oai;
 use crate::version;
 use anyhow::Result;
@@ -99,8 +99,7 @@ async fn sync_impl(
     info!(from = %from, "starting OAI-PMH sync");
 
     let client = net::client(cx.cfg.network.contact.as_deref())?;
-    let rl = RateLimiter::new(net::rate_limit_path(root), cx.cfg.network.min_interval_s);
-    let records = oai::list_records(&client, &rl, Some(&from)).await?;
+    let records = oai::list_records(&client, &cx.rate_limiter, Some(&from)).await?;
 
     let mut updated = 0usize;
     for rec in &records {

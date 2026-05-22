@@ -3,7 +3,7 @@
 
 use crate::cli::{Context, FeedArgs, FeedView};
 use crate::feed::{self, Item};
-use crate::net::{self, RateLimiter};
+use crate::net;
 use anyhow::Result;
 
 pub async fn run(cx: &Context, args: FeedArgs) -> Result<()> {
@@ -12,8 +12,7 @@ pub async fn run(cx: &Context, args: FeedArgs) -> Result<()> {
     }
     let url = build_url(&args);
     let client = net::client(cx.cfg.network.contact.as_deref())?;
-    let rl = RateLimiter::new(net::rate_limit_path(&cx.cfg.cache_root), cx.cfg.network.min_interval_s);
-    let body = net::get_text(&client, &rl, &url).await?;
+    let body = net::get_text(&client, &cx.rate_limiter, &url).await?;
     let items = feed::parse_rss(&body).map_err(|e| anyhow::anyhow!("{e}"))?;
     let shown: Vec<&Item> = items.iter().take(args.limit).collect();
     if cx.json {
