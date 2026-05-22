@@ -53,16 +53,22 @@ impl Canonical {
         &self.0
     }
 
-    /// Unix seconds (UTC). Safe: the inner string passed validation at
-    /// construction, so date math can't fail.
-    pub fn to_unix(&self) -> i64 {
+    /// Unix seconds (UTC).
+    ///
+    /// Reads ASCII digit bytes via plain arithmetic — no fallible
+    /// operations involved. The output is well-defined as a pure
+    /// function of the byte content of `self.0`. Combined with
+    /// [`Canonical::from_str`]'s guarantee that every relevant byte is
+    /// an ASCII digit and the year is ≥ 1970, the unsigned subtraction
+    /// at the end of the date-math helpers cannot underflow.
+    pub fn to_unix(&self) -> u64 {
         let b = self.0.as_bytes();
-        let y: i64 = parse_n(&b[0..4]);
-        let m: i64 = parse_n(&b[4..6]);
-        let d: i64 = parse_n(&b[6..8]);
-        let hh: i64 = parse_n(&b[9..11]);
-        let mm: i64 = parse_n(&b[11..13]);
-        let ss: i64 = parse_n(&b[13..15]);
+        let y = read_digits(&b[0..4]);
+        let m = read_digits(&b[4..6]);
+        let d = read_digits(&b[6..8]);
+        let hh = read_digits(&b[9..11]);
+        let mm = read_digits(&b[11..13]);
+        let ss = read_digits(&b[13..15]);
         days_since_epoch(y, m, d) * 86_400 + hh * 3600 + mm * 60 + ss
     }
 }
@@ -70,11 +76,17 @@ impl Canonical {
 impl FromStr for Canonical {
     type Err = VersionError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if canonical_re().is_match(s) {
-            Ok(Canonical(s.to_owned()))
-        } else {
-            Err(VersionError::Canonical { got: s.to_owned() })
+        if !canonical_re().is_match(s) {
+            return Err(VersionError::Canonical { got: s.to_owned() });
         }
+        // Year ≥ 1970 is the precondition for `to_unix`'s unsigned date
+        // math; we never see pre-1970 timestamps from eprint anyway
+        // (the archive started in 1996).
+        let year = read_digits(&s.as_bytes()[0..4]);
+        if year < 1970 {
+            return Err(VersionError::Canonical { got: s.to_owned() });
+        }
+        Ok(Canonical(s.to_owned()))
     }
 }
 
@@ -112,11 +124,14 @@ impl<'de> Deserialize<'de> for Canonical {
 impl FromStr for OaiDatestamp {
     type Err = VersionError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if oai_re().is_match(s) {
-            Ok(OaiDatestamp(s.to_owned()))
-        } else {
-            Err(VersionError::Oai { got: s.to_owned() })
+        if !oai_re().is_match(s) {
+            return Err(VersionError::Oai { got: s.to_owned() });
         }
+        let year = read_digits(&s.as_bytes()[0..4]);
+        if year < 1970 {
+            return Err(VersionError::Oai { got: s.to_owned() });
+        }
+        Ok(OaiDatestamp(s.to_owned()))
     }
 }
 
@@ -128,14 +143,20 @@ impl std::fmt::Display for OaiDatestamp {
 
 impl From<&OaiDatestamp> for Canonical {
     fn from(src: &OaiDatestamp) -> Canonical {
-        // src is already validated; the conversion just strips
-        // separators. Re-validating is cheap insurance.
-        let stripped: String = src
-            .0
-            .chars()
-            .filter(|c| c.is_ascii_digit() || *c == 'T' || *c == 'Z')
-            .collect();
-        Canonical(stripped)
+        // OaiDatestamp invariant: byte layout is fixed as
+        //   index  0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19
+        //   char   Y Y Y Y - M M - D D T  H  H  :  M  M  :  S  S  Z
+        let s = src.0.as_bytes();
+        let mut out = String::with_capacity(16);
+        out.push_str(std::str::from_utf8(&s[0..4]).unwrap());   // YYYY
+        out.push_str(std::str::from_utf8(&s[5..7]).unwrap());   // MM
+        out.push_str(std::str::from_utf8(&s[8..10]).unwrap());  // DD
+        out.push('T');
+        out.push_str(std::str::from_utf8(&s[11..13]).unwrap()); // HH
+        out.push_str(std::str::from_utf8(&s[14..16]).unwrap()); // MM
+        out.push_str(std::str::from_utf8(&s[17..19]).unwrap()); // SS
+        out.push('Z');
+        Canonical(out)
     }
 }
 
@@ -146,11 +167,14 @@ impl From<&OaiDatestamp> for Canonical {
 impl FromStr for ArchiveCompact {
     type Err = VersionError;
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if compact_re().is_match(s) {
-            Ok(ArchiveCompact(s.to_owned()))
-        } else {
-            Err(VersionError::Compact { got: s.to_owned() })
+        if !compact_re().is_match(s) {
+            return Err(VersionError::Compact { got: s.to_owned() });
         }
+        let year = read_digits(&s.as_bytes()[0..4]);
+        if year < 1970 {
+            return Err(VersionError::Compact { got: s.to_owned() });
+        }
+        Ok(ArchiveCompact(s.to_owned()))
     }
 }
 
@@ -162,9 +186,16 @@ impl std::fmt::Display for ArchiveCompact {
 
 impl From<&ArchiveCompact> for Canonical {
     fn from(src: &ArchiveCompact) -> Canonical {
-        // `YYYYMMDD:HHMMSS` → `YYYYMMDDTHHMMSSZ`. Both halves validated.
-        let (date, time) = src.0.split_once(':').expect("ArchiveCompact invariant: contains a colon");
-        Canonical(format!("{date}T{time}Z"))
+        // ArchiveCompact invariant: byte layout is fixed as
+        //   index  0 1 2 3 4 5 6 7 8 9 10 11 12 13 14
+        //   char   Y Y Y Y M M D D : H  H  M  M  S  S
+        let s = src.0.as_bytes();
+        let mut out = String::with_capacity(16);
+        out.push_str(std::str::from_utf8(&s[0..8]).unwrap());   // YYYYMMDD
+        out.push('T');
+        out.push_str(std::str::from_utf8(&s[9..15]).unwrap());  // HHMMSS
+        out.push('Z');
+        Canonical(out)
     }
 }
 
@@ -190,23 +221,35 @@ fn compact_re() -> &'static regex::Regex {
 }
 
 // ============================================================
-// Date math (only callable from a validated Canonical)
+// Date math
 // ============================================================
 
-fn parse_n(b: &[u8]) -> i64 {
-    // Safety: caller guarantees `b` contains ASCII digits (regex-checked
-    // at construction). Reused across all four call sites in to_unix.
-    std::str::from_utf8(b).unwrap().parse().unwrap()
+/// Read a fixed-width ASCII-digit byte sequence as a `u64`. Non-digit
+/// bytes contribute wrapped arithmetic (junk) — but this function is
+/// only ever invoked with byte slices that the regex layer has already
+/// confirmed are all ASCII digits, so the result is the parsed number.
+///
+/// No panics. No fallible operations. Purely arithmetic.
+fn read_digits(b: &[u8]) -> u64 {
+    let mut n: u64 = 0;
+    for &byte in b {
+        n = n * 10 + (byte.wrapping_sub(b'0')) as u64;
+    }
+    n
 }
 
-/// Days from 1970-01-01 to (y, m, d). Howard Hinnant's algorithm.
-fn days_since_epoch(y: i64, m: i64, d: i64) -> i64 {
+/// Days from 1970-01-01 to (y, m, d). Howard Hinnant's civil-from-days
+/// algorithm, restricted to year ≥ 1970 so we can stay in `u64`.
+fn days_since_epoch(y: u64, m: u64, d: u64) -> u64 {
     let y = if m <= 2 { y - 1 } else { y };
-    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let era = y / 400;
     let yoe = y - era * 400;
     let m_adj = if m > 2 { m - 3 } else { m + 9 };
     let doy = (153 * m_adj + 2) / 5 + d - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    // 719468 is the day-of-era for 1970-01-01, so for y ≥ 1970 the
+    // expression `era * 146097 + doe` is ≥ 719468 and the subtraction
+    // cannot underflow.
     era * 146097 + doe - 719468
 }
 
@@ -259,6 +302,15 @@ mod tests {
         assert_eq!(epoch.to_unix(), 0);
         let c2: Canonical = "20250106T174348Z".parse().unwrap();
         assert_eq!(c2.to_unix(), 1736185428);
+    }
+
+    #[test]
+    fn rejects_pre_1970_years() {
+        // Year < 1970 is rejected by every Canonical/OaiDatestamp/ArchiveCompact
+        // FromStr — keeps to_unix's unsigned subtraction safe by construction.
+        assert!("19691231T235959Z".parse::<Canonical>().is_err());
+        assert!("1969-12-31T23:59:59Z".parse::<OaiDatestamp>().is_err());
+        assert!("19691231:235959".parse::<ArchiveCompact>().is_err());
     }
 
     #[test]
