@@ -23,6 +23,7 @@ async-trait = { workspace = true }
 bytes = { workspace = true }
 quick-xml = { workspace = true }
 governor = { workspace = true }
+time = { workspace = true }
 
 # Interactive picker for --select-version
 dialoguer = "0.11"

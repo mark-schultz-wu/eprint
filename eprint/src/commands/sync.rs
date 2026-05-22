@@ -15,7 +15,8 @@ use crate::oai;
 use crate::version;
 use anyhow::Result;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
+use time::macros::format_description;
+use time::OffsetDateTime;
 use tracing::info;
 
 pub const LAST_SYNC_STAMP: &str = ".last_sync_unix_s";
@@ -167,28 +168,14 @@ async fn write_last_sync(root: &Path, unix_s: i64) -> Result<()> {
 }
 
 fn now_unix() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    OffsetDateTime::now_utc().unix_timestamp()
 }
 
 fn iso_date_from_unix(unix_s: i64) -> String {
-    let secs = unix_s.max(0);
-    let days = secs / 86_400;
-    let (y, m, d) = ymd_from_days_since_epoch(days);
-    format!("{y:04}-{m:02}-{d:02}")
-}
-
-fn ymd_from_days_since_epoch(z: i64) -> (i32, u32, u32) {
-    let z = z + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = (z - era * 146097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = (yoe as i64) + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
-    let y = (y + if m <= 2 { 1 } else { 0 }) as i32;
-    (y, m, d)
+    let dt = OffsetDateTime::from_unix_timestamp(unix_s.max(0))
+        .unwrap_or(OffsetDateTime::UNIX_EPOCH);
+    dt.format(format_description!("[year]-[month]-[day]"))
+        .expect("YYYY-MM-DD format is infallible")
 }
 
 #[cfg(test)]

@@ -103,8 +103,8 @@ mod tests {
     fn parses_three_versions_ascending() {
         let v = parse_archive_page(SAMPLE).unwrap();
         assert_eq!(v.len(), 3);
-        assert_eq!(v[0].timestamp.as_str(), "20240319T143540Z");
-        assert_eq!(v[2].timestamp.as_str(), "20250106T174348Z");
+        assert_eq!(v[0].timestamp.to_string(), "20240319T143540Z");
+        assert_eq!(v[2].timestamp.to_string(), "20250106T174348Z");
         assert!(v[2].is_current);
     }
 

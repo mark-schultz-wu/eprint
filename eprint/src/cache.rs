@@ -85,7 +85,7 @@ pub fn paper_dir(root: &Path, id: PaperId) -> PathBuf {
 }
 
 pub fn version_dir(root: &Path, id: PaperId, version: &version::Canonical) -> PathBuf {
-    paper_dir(root, id).join(version.as_str())
+    paper_dir(root, id).join(version.to_string())
 }
 
 pub fn paper_meta_path(root: &Path, id: PaperId) -> PathBuf {
