@@ -130,8 +130,8 @@ pub async fn get_record(
     id: PaperId,
 ) -> Result<Option<Record>> {
     let url = format!(
-        "{BASE_URL}?verb=GetRecord&identifier=oai:eprint.iacr.org:{}/{}&metadataPrefix=oai_dc",
-        id.year, id.num
+        "{BASE_URL}?verb=GetRecord&identifier={}&metadataPrefix=oai_dc",
+        id.oai_identifier()
     );
     let body = net::get_text(client, rl, &url).await?;
     parse_record(&body).context("parsing OAI-PMH GetRecord response")

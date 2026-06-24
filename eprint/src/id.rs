@@ -37,6 +37,17 @@ impl PaperId {
         format!("{}/{}", self.year, self.num)
     }
 
+    /// OAI-PMH identifier for this paper, e.g. `oai:eprint.iacr.org:2016/086`.
+    ///
+    /// eprint zero-pads the number to a **minimum of three digits** in the OAI
+    /// identifier (`2009/001`, `2016/086`, but `2024/1234` unchanged) — unlike
+    /// the bare number used in landing-page/PDF URLs. Sending the unpadded form
+    /// (`2016/86`) to `GetRecord` returns `idDoesNotExist`, so anything below
+    /// paper 100 would silently fail to resolve.
+    pub fn oai_identifier(&self) -> String {
+        format!("oai:eprint.iacr.org:{}/{:03}", self.year, self.num)
+    }
+
     /// Subdirectory under the cache root: `<year>/<num:04>/`.
     pub fn cache_subdir(&self) -> String {
         format!("{}/{:04}", self.year, self.num)
@@ -106,6 +117,28 @@ mod tests {
     #[test]
     fn pads_cache_subdir() {
         assert_eq!(PaperId { year: 2025, num: 7 }.cache_subdir(), "2025/0007");
+    }
+
+    #[test]
+    fn oai_identifier_pads_number_to_min_three_digits() {
+        // eprint's OAI endpoint only recognizes the 3-min-width form; the bare
+        // number (`2016/86`) yields idDoesNotExist. Numbers >= 100 are unchanged.
+        assert_eq!(PaperId { year: 2009, num: 1 }.oai_identifier(), "oai:eprint.iacr.org:2009/001");
+        assert_eq!(PaperId { year: 2016, num: 86 }.oai_identifier(), "oai:eprint.iacr.org:2016/086");
+        assert_eq!(PaperId { year: 2023, num: 525 }.oai_identifier(), "oai:eprint.iacr.org:2023/525");
+        assert_eq!(PaperId { year: 2024, num: 1234 }.oai_identifier(), "oai:eprint.iacr.org:2024/1234");
+    }
+
+    #[test]
+    fn oai_identifier_round_trips_through_parser() {
+        // The padded identifier we emit must parse back to the same id, so OAI
+        // ListRecords (which echoes the padded form) stays consistent with us.
+        for (year, num) in [(2009u16, 1u32), (2016, 86), (2024, 1234)] {
+            let id = PaperId { year, num };
+            let ident = id.oai_identifier();
+            let inner = ident.strip_prefix("oai:eprint.iacr.org:").unwrap();
+            assert_eq!(inner.parse::<PaperId>().unwrap(), id);
+        }
     }
 
     #[test]
