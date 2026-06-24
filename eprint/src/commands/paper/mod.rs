@@ -18,6 +18,9 @@ mod resolve;
 use crate::cache;
 use crate::cli::{Context, PaperArgs};
 use crate::id::PaperId;
+use crate::net;
+use crate::oai;
+use crate::version;
 use anyhow::{Context as _, Result};
 use serde::Serialize;
 use tracing::warn;
@@ -67,6 +70,45 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
         }
     }
 
+    // 1b. If we still don't know the current version (archive scrape blocked,
+    //     or a brand-new paper), fall back to OAI-PMH GetRecord — the reliably
+    //     reachable endpoint — for the current version plus title/abstract.
+    //     Without this, a PDF already delivered to the downloads dir can't be
+    //     filed, since there's no version to file it under.
+    let mut oai_abstract: Option<String> = None;
+    let have_current = paper_meta
+        .as_ref()
+        .and_then(|p| p.current_version.as_ref())
+        .is_some();
+    if !have_current && !cx.offline {
+        let client = net::client(cx.cfg.network.contact.as_deref())?;
+        match oai::get_record(&client, &cx.rate_limiter, id).await {
+            Ok(Some(rec)) => match rec.datestamp.parse::<version::OaiDatestamp>() {
+                Ok(ds) => {
+                    let cv: version::Canonical = (&ds).into();
+                    let mut pm = paper_meta
+                        .take()
+                        .unwrap_or_else(|| cache::PaperMeta::for_first_fetch(cv));
+                    pm.current_version = Some(cv);
+                    if !pm.known_versions.contains(&cv) {
+                        pm.known_versions.push(cv);
+                        pm.known_versions.sort();
+                    }
+                    if rec.title.is_some() {
+                        pm.title = rec.title.clone();
+                    }
+                    cache::write_paper_meta(root, id, &pm).await?;
+                    paper_meta = Some(pm);
+                    oai_abstract = rec.abstract_;
+                    report.actions.push("oai-resolved");
+                }
+                Err(e) => warn!(error = %e, "OAI datestamp not parseable; skipping OAI fallback"),
+            },
+            Ok(None) => warn!("OAI-PMH has no record for {id}"),
+            Err(e) => warn!(error = %e, "OAI-PMH GetRecord failed"),
+        }
+    }
+
     // 2. Pick a version to operate on.
     let target_version = resolve::target_version(cx, id, paper_meta.as_ref(), &args).await?;
 
@@ -77,6 +119,17 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     } else {
         None
     };
+
+    // 3b. Persist the OAI abstract if the (often-blocked) landing scrape didn't
+    //     already write one for this version.
+    if let (Some(abs), Some(v)) = (&oai_abstract, &resolved_version) {
+        let ap = cache::version_paths(root, id, v).abstract_;
+        if !ap.exists() {
+            if let Err(e) = tokio::fs::write(&ap, abs).await {
+                warn!(error = %e, "could not write OAI abstract");
+            }
+        }
+    }
 
     // 4. Reload meta (fetch may have rewritten it) for emit.
     let paper_meta = cache::read_paper_meta(root, id).await;

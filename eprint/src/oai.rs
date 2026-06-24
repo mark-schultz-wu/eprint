@@ -108,6 +108,112 @@ fn urlencode(s: &str) -> String {
     out
 }
 
+/// One paper's current metadata from an OAI-PMH `GetRecord` (oai_dc).
+///
+/// Used as the reliable fallback for version discovery + title/abstract: the
+/// archive/landing pages sit behind Cloudflare and are often 403, but the OAI
+/// endpoint stays reachable, so this is what lets a downloads-dir PDF be filed
+/// when scraping is blocked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Record {
+    /// `YYYY-MM-DDThh:mm:ssZ` last-modified stamp = the current version.
+    pub datestamp: String,
+    pub title: Option<String>,
+    pub abstract_: Option<String>,
+}
+
+/// Fetch one paper's record via `GetRecord` + `oai_dc`. `Ok(None)` when the
+/// paper has no OAI record (`idDoesNotExist`).
+pub async fn get_record(
+    client: &reqwest::Client,
+    rl: &RateLimiter,
+    id: PaperId,
+) -> Result<Option<Record>> {
+    let url = format!(
+        "{BASE_URL}?verb=GetRecord&identifier=oai:eprint.iacr.org:{}/{}&metadataPrefix=oai_dc",
+        id.year, id.num
+    );
+    let body = net::get_text(client, rl, &url).await?;
+    parse_record(&body).context("parsing OAI-PMH GetRecord response")
+}
+
+/// Parse a `GetRecord` response: the header `datestamp` plus `dc:title` and
+/// `dc:description` from the `oai_dc` metadata. `Ok(None)` for a missing
+/// record; `Err` for other OAI errors.
+pub fn parse_record(xml: &str) -> Result<Option<Record>> {
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let mut buf = Vec::new();
+    let mut field: Option<RecField> = None;
+    let mut datestamp: Option<String> = None;
+    let mut title: Option<String> = None;
+    let mut abstract_: Option<String> = None;
+
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) => match local_name(e.name().as_ref()).as_str() {
+                "datestamp" => field = Some(RecField::Datestamp),
+                "title" => field = Some(RecField::Title),
+                "description" => field = Some(RecField::Description),
+                "error" => return on_record_error(&e),
+                _ => {}
+            },
+            Ok(Event::Empty(e)) => {
+                if local_name(e.name().as_ref()) == "error" {
+                    return on_record_error(&e);
+                }
+            }
+            Ok(Event::Text(t)) => {
+                let text = t.unescape().unwrap_or_default().into_owned();
+                match field {
+                    Some(RecField::Datestamp) if datestamp.is_none() => datestamp = Some(text),
+                    Some(RecField::Title) if title.is_none() => title = Some(text),
+                    Some(RecField::Description) if abstract_.is_none() => abstract_ = Some(text),
+                    _ => {}
+                }
+            }
+            Ok(Event::End(e)) => {
+                if matches!(
+                    local_name(e.name().as_ref()).as_str(),
+                    "datestamp" | "title" | "description"
+                ) {
+                    field = None;
+                }
+            }
+            Ok(Event::Eof) => break,
+            Err(e) => {
+                return Err(anyhow::anyhow!(
+                    "XML parse error at position {}: {e}",
+                    reader.buffer_position()
+                ))
+            }
+            _ => {}
+        }
+        buf.clear();
+    }
+
+    Ok(datestamp.map(|ds| Record {
+        datestamp: ds,
+        title: title.filter(|s| !s.is_empty()),
+        abstract_: abstract_.filter(|s| !s.is_empty()),
+    }))
+}
+
+/// A missing record is `Ok(None)`; any other OAI error code propagates.
+fn on_record_error(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<Record>> {
+    match attr(e, "code").as_deref() {
+        Some("idDoesNotExist") | Some("noRecordsMatch") => Ok(None),
+        other => anyhow::bail!("OAI-PMH GetRecord error: code={}", other.unwrap_or("unknown")),
+    }
+}
+
+#[derive(Copy, Clone)]
+enum RecField {
+    Datestamp,
+    Title,
+    Description,
+}
+
 /// Parse one OAI-PMH response page.
 pub fn parse_page(xml: &str) -> Result<PageResult> {
     let mut reader = Reader::from_str(xml);
@@ -291,6 +397,42 @@ mod tests {
     fn urlencodes_ts() {
         assert_eq!(urlencode("2026-05-21T08:48:16Z"), "2026-05-21T08:48:16Z");
         assert_eq!(urlencode("a b"), "a%20b");
+    }
+
+    const GETRECORD_SAMPLE: &str = r##"<?xml version="1.0"?>
+<OAI-PMH xmlns="http://www.openarchives.org/OAI/2.0/">
+  <GetRecord><record>
+    <header>
+      <identifier>oai:eprint.iacr.org:2023/525</identifier>
+      <datestamp>2023-04-11T20:49:58Z</datestamp>
+    </header>
+    <metadata><oai_dc:dc xmlns:oai_dc="http://www.openarchives.org/OAI/2.0/oai_dc/" xmlns:dc="http://purl.org/dc/elements/1.1/">
+      <dc:title>Error Correction and Ciphertext Quantization</dc:title>
+      <dc:creator>Alice</dc:creator>
+      <dc:description>An interesting abstract.</dc:description>
+      <dc:date>2023-04-11T20:49:58Z</dc:date>
+    </oai_dc:dc></metadata>
+  </record></GetRecord>
+</OAI-PMH>"##;
+
+    #[test]
+    fn parses_get_record() {
+        let r = parse_record(GETRECORD_SAMPLE).unwrap().unwrap();
+        assert_eq!(r.datestamp, "2023-04-11T20:49:58Z");
+        assert_eq!(r.title.as_deref(), Some("Error Correction and Ciphertext Quantization"));
+        assert_eq!(r.abstract_.as_deref(), Some("An interesting abstract."));
+    }
+
+    #[test]
+    fn get_record_id_does_not_exist_is_none() {
+        let xml = r##"<OAI-PMH><error code="idDoesNotExist">no such id</error></OAI-PMH>"##;
+        assert!(parse_record(xml).unwrap().is_none());
+    }
+
+    #[test]
+    fn get_record_other_error_propagates() {
+        let xml = r##"<OAI-PMH><error code="badArgument">nope</error></OAI-PMH>"##;
+        assert!(parse_record(xml).is_err());
     }
 
     #[test]
