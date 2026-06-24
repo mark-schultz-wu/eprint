@@ -30,6 +30,10 @@ pub struct Cli {
     /// Cache staleness threshold in hours.
     #[arg(long, global = true, env = "EPRINT_SYNC_STALE_HOURS")]
     pub sync_stale_hours: Option<u32>,
+    /// Directory scanned for browser-delivered PDFs (`<year>-<num>.pdf`).
+    /// Defaults to `EPRINT_DOWNLOADS_DIR` or `~/Downloads`.
+    #[arg(long, global = true)]
+    pub downloads_dir: Option<std::path::PathBuf>,
 
     #[command(subcommand)]
     pub command: Command,

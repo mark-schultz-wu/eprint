@@ -82,11 +82,11 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     let paper_meta = cache::read_paper_meta(root, id).await;
     if let Some(pm) = &paper_meta {
         report.title = pm.title.clone();
-        report.current_version = pm.current_version.clone();
+        report.current_version = pm.current_version;
         report.known_versions = pm.known_versions.clone();
     }
     report.cached_versions = cache::existing_versions(root, id);
-    report.resolved_version = resolved_version.clone();
+    report.resolved_version = resolved_version;
     if let Some(v) = &resolved_version {
         report.directory = Some(cache::version_dir(root, id, v).display().to_string());
     }

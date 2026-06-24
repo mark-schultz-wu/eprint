@@ -1,9 +1,15 @@
 //! Local backend: subprocesses MinerU via `uv`.
 //!
-//! Requires `uv` on `PATH`. The first call will install MinerU into uv's
-//! cache (heavy: ~1–2 GB of model weights). Subsequent calls are fast to
-//! start up but the conversion itself still takes minutes for math-heavy
-//! papers.
+//! `uv` is the one dependency for local ML conversion: a single static binary
+//! that bootstraps an ephemeral Python + MinerU on first use (no system Python,
+//! pip, or manual MinerU install needed). The first call downloads MinerU's
+//! model weights into uv's cache (~1–2 GB); subsequent calls start fast, though
+//! conversion itself still takes minutes for math-heavy papers.
+//!
+//! If `uv` is absent we fail fast with [`Error::BackendUnavailable`] and
+//! actionable guidance rather than an opaque ENOENT from the heavy `uv run`.
+//! The `text` quality tier needs none of this — it's pure-Rust `pdf-extract`
+//! in the downstream binary.
 
 use crate::{Conversion, Converter, Error, Quality, Result};
 use std::path::{Path, PathBuf};
@@ -49,7 +55,32 @@ impl Converter for LocalConverter {
 }
 
 impl LocalConverter {
+    /// Verify `uv` is invocable before attempting the (heavy) conversion, so a
+    /// missing dependency surfaces as actionable guidance rather than a raw
+    /// "No such file or directory" from the subprocess spawn.
+    async fn preflight(&self) -> Result<()> {
+        match Command::new(&self.uv_binary).arg("--version").output().await {
+            Ok(o) if o.status.success() => Ok(()),
+            Ok(o) => Err(Error::BackendUnavailable(format!(
+                "`{}` failed its version check (exit {:?}); is it a working uv install?",
+                self.uv_binary.display(),
+                o.status.code(),
+            ))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                Err(Error::BackendUnavailable(format!(
+                    "`{}` not found on PATH. Local ML conversion needs uv — it bootstraps \
+                     Python + MinerU for you. Install it from https://docs.astral.sh/uv/, \
+                     or run ML on a remote endpoint instead. (The default `text` quality \
+                     needs no external tools.)",
+                    self.uv_binary.display(),
+                )))
+            }
+            Err(e) => Err(Error::Io(e)),
+        }
+    }
+
     async fn convert_ml(&self, pdf_path: &Path) -> Result<Conversion> {
+        self.preflight().await?;
         let start = Instant::now();
         let tmp = tempfile::tempdir()?;
         let span = info_span!("mineru_convert", paper = %pdf_path.display());
@@ -86,6 +117,26 @@ impl LocalConverter {
         }
         .instrument(span)
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn missing_uv_yields_actionable_backend_unavailable() {
+        let dir = tempfile::tempdir().unwrap();
+        let pdf = dir.path().join("p.pdf");
+        std::fs::write(&pdf, b"%PDF-1.4\n").unwrap();
+        let conv = LocalConverter {
+            uv_binary: "uv-that-does-not-exist-9f3a2b".into(),
+            mineru_spec: "mineru".into(),
+        };
+        match conv.convert(&pdf, Quality::Ml).await {
+            Err(Error::BackendUnavailable(msg)) => assert!(msg.contains("uv")),
+            other => panic!("expected BackendUnavailable, got {other:?}"),
+        }
     }
 }
 

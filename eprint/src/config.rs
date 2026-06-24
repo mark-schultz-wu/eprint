@@ -8,6 +8,7 @@
 //! | Var                          | Meaning                                                           |
 //! |------------------------------|-------------------------------------------------------------------|
 //! | `EPRINT_CACHE_DIR`           | cache root (default: `$XDG_CACHE_HOME/eprint`)                    |
+//! | `EPRINT_DOWNLOADS_DIR`       | dir scanned for browser-delivered PDFs (default: `~/Downloads`)   |
 //! | `EPRINT_CONTACT`             | contact appended to outbound `User-Agent`                         |
 //! | `EPRINT_MIN_INTERVAL_S`      | minimum seconds between outbound HTTP requests (default `2.0`)    |
 //! | `EPRINT_ML_BACKEND`          | `local` (default) or `remote`                                     |
@@ -24,6 +25,8 @@ use std::path::PathBuf;
 #[derive(Debug, Clone)]
 pub struct Config {
     pub cache_root: PathBuf,
+    /// Directory scanned for browser-delivered PDFs (`<year>-<num>.pdf`).
+    pub downloads_dir: PathBuf,
     pub network: Network,
     pub ml: Backend,
     pub sync: Sync,
@@ -59,6 +62,7 @@ impl Config {
     pub fn from_env() -> Self {
         Self {
             cache_root: cache_root_from_env(),
+            downloads_dir: downloads_dir_from_env(),
             network: Network {
                 contact: env_string("EPRINT_CONTACT"),
                 min_interval_s: env_f64("EPRINT_MIN_INTERVAL_S").unwrap_or(2.0),
@@ -87,6 +91,13 @@ fn cache_root_from_env() -> PathBuf {
         return PathBuf::from(v);
     }
     dirs::cache_dir().unwrap_or_else(|| PathBuf::from(".")).join("eprint")
+}
+
+fn downloads_dir_from_env() -> PathBuf {
+    if let Some(v) = env_string("EPRINT_DOWNLOADS_DIR") {
+        return PathBuf::from(v);
+    }
+    dirs::home_dir().unwrap_or_else(|| PathBuf::from(".")).join("Downloads")
 }
 
 fn env_string(key: &str) -> Option<String> {

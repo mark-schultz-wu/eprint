@@ -9,10 +9,29 @@ This is a Cargo workspace with two crates:
 - **`papermd/`** — a small crate that converts academic PDFs to Markdown.
   Has two backends:
   - `LocalConverter` — subprocesses
-    [MinerU](https://github.com/opendatalab/MinerU) via `uv` (requires
-    Python + uv on the machine).
+    [MinerU](https://github.com/opendatalab/MinerU) via `uv`. Needs **only
+    `uv`** on `PATH` — it bootstraps an ephemeral Python + MinerU on first use
+    (no system Python/pip/MinerU install). First run pulls ~1–2 GB of model
+    weights into uv's cache.
   - `RemoteConverter` — HTTP client that talks to a MinerU FastAPI server
     (or any server speaking the same simple `POST /v1/convert` API).
+
+## Dependencies
+
+The base tool is self-contained — no runtime dependencies:
+
+- **Default (`text` quality)** uses the pure-Rust `pdf-extract` crate. No
+  Python, no network, nothing to install.
+- **`--md ml` (high-fidelity, math/tables)** needs an ML backend:
+  - *local* (`EPRINT_ML_BACKEND=local`, default): just `uv`. Missing uv yields
+    an actionable error, not a crash.
+  - *remote* (`EPRINT_ML_BACKEND=remote`): set `EPRINT_ML_ENDPOINT`; no local
+    Python/uv needed.
+
+PDFs themselves are **not** fetched over HTTP — `eprint.iacr.org` is behind a
+Cloudflare challenge (403). They arrive via the downloads dir
+(`EPRINT_DOWNLOADS_DIR`, default `~/Downloads`), delivered by the companion
+MacBook watcher; an S3 source is planned. See `eprint/src/source.rs`.
 
 ## CLI
 

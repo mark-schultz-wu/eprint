@@ -5,11 +5,13 @@ mod cache;
 mod cli;
 mod commands;
 mod config;
+mod downloads;
 mod feed;
 mod id;
 mod net;
 mod oai;
 mod scrape;
+mod source;
 mod version;
 
 use anyhow::Result;
@@ -26,6 +28,9 @@ async fn main() -> Result<()> {
     }
     if let Some(h) = args.sync_stale_hours {
         cfg.sync.stale_after_hours = h;
+    }
+    if let Some(d) = args.downloads_dir {
+        cfg.downloads_dir = d;
     }
     let rate_limiter = net::rate_limiter(cfg.network.min_interval_s, 3);
     let cx = cli::Context { cfg, offline: args.offline, json: args.json, rate_limiter };

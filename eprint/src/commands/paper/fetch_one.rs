@@ -1,21 +1,24 @@
-//! Download a single specific version of a paper into the cache.
-//! Handles both current (canonical /<id>.pdf URL) and historical
-//! (`/archive/<id>/<unix>.pdf` URL) versions, computing the latter
-//! via `PaperId::historical_pdf_url`.
+//! Ensure a specific version of a paper's PDF is in the cache.
+//!
+//! PDF bytes are acquired through the pluggable source list in
+//! [`crate::source`] (downloads dir, then network; S3 later). Metadata
+//! (title/bib/abstract) is scraped from the landing page best-effort, and
+//! per-version + paper-level meta are updated on success.
 
 use crate::cache::{self, PaperMeta, VersionMeta};
 use crate::cli::Context;
 use crate::id::PaperId;
 use crate::net;
 use crate::scrape;
+use crate::source;
 use crate::version::Canonical;
 use crate::commands::paper::PaperReport;
 use anyhow::Result;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::warn;
 
-/// Ensure `<root>/<id>/<version>/paper.pdf` exists. Downloads if missing.
-/// Updates per-version + paper-level meta on a successful download.
+/// Ensure `<root>/<id>/<version>/paper.pdf` exists. Acquires it if missing.
+/// Updates per-version + paper-level meta on success.
 pub async fn ensure_version(
     cx: &Context,
     id: PaperId,
@@ -28,59 +31,63 @@ pub async fn ensure_version(
     if paths.pdf.exists() {
         return Ok(());
     }
-    if cx.offline {
-        anyhow::bail!("--offline set; {} version {} not in cache", id, version);
-    }
-
     tokio::fs::create_dir_all(&paths.dir).await?;
-    let client = net::client(cx.cfg.network.contact.as_deref())?;
-    let rl = &*cx.rate_limiter;
 
-    // Decide which URL to hit. The canonical /<id>.pdf serves the current
-    // version; older versions live at /archive/<id>/<unix>.pdf.
+    // Is this the paper's current version? Some sources (the downloads dir)
+    // only ever hold the current PDF; historical versions come from elsewhere.
     let is_current = paper_meta
         .as_deref()
         .and_then(|p| p.current_version.as_ref())
         == Some(version);
-    let pdf_url = if is_current {
-        id.pdf_url()
-    } else {
-        id.historical_pdf_url(version)
-    };
 
-    let pdf_bytes = net::get_bytes(&client, &rl, &pdf_url).await?;
+    // Pull the bytes from the first source that has them.
+    let acquired = source::acquire(cx, &source::PdfRequest { id, version, is_current }).await?;
     anyhow::ensure!(
-        net::looks_like_pdf(&pdf_bytes),
-        "downloaded {} bytes from {pdf_url} that don't look like a PDF",
-        pdf_bytes.len()
+        net::looks_like_pdf(&acquired.bytes),
+        "{} bytes for {} version {} (source: {}) don't look like a PDF (missing %PDF header)",
+        acquired.bytes.len(),
+        id,
+        version,
+        acquired.source,
     );
-    tokio::fs::write(&paths.pdf, &pdf_bytes).await?;
-    report.bytes_downloaded += pdf_bytes.len() as u64;
+    tokio::fs::write(&paths.pdf, &acquired.bytes).await?;
+    if acquired.network {
+        report.bytes_downloaded += acquired.bytes.len() as u64;
+    }
+    report.actions.push(match acquired.source {
+        "downloads" => "pdf-from-downloads",
+        _ if is_current => "fetched-pdf",
+        _ => "fetched-historical-pdf",
+    });
 
-    // Scrape the landing page when:
-    //   * We're fetching the current version (canonical bib/abstract for
-    //     this version live there), OR
-    //   * We don't yet have a title on file (any landing-page visit will
-    //     yield one, even when we're pulling a historical PDF).
+    // Scrape the landing page for metadata when:
+    //   * we're on the current version (its canonical bib/abstract live there), OR
+    //   * we don't yet have a title on file (any landing visit yields one).
     //
-    // The landing page at /<id> always describes the *current* version,
-    // so for historical fetches we save the title (shared across versions)
-    // but NOT the bib/abstract (which would mislabel the historical dir).
+    // The landing page always describes the *current* version, so for historical
+    // fetches we keep the title (shared across versions) but not bib/abstract.
+    //
+    // NOTE: eprint.iacr.org landing pages are currently Cloudflare-blocked (403),
+    // so this is best-effort: both fetch and parse failures demote to a warning
+    // rather than failing the command — the PDF is already cached.
     let have_title = paper_meta
         .as_deref()
         .and_then(|p| p.title.as_deref())
         .is_some();
-    let need_landing = is_current || !have_title;
+    let need_landing = (is_current || !have_title) && !cx.offline;
     if need_landing {
-        let html = net::get_text(&client, &rl, &id.html_url()).await?;
-        report.bytes_downloaded += html.len() as u64;
-        // Demote scrape failures to a warning: the PDF is already on
-        // disk; missing metadata is recoverable on a future fetch
-        // (or via an updated regex set).
-        let landing = match scrape::parse(&html) {
-            Ok(l) => l,
+        let client = net::client(cx.cfg.network.contact.as_deref())?;
+        let rl = &*cx.rate_limiter;
+        let landing = match net::get_text(&client, rl, &id.html_url()).await {
+            Ok(html) => {
+                report.bytes_downloaded += html.len() as u64;
+                scrape::parse(&html).unwrap_or_else(|e| {
+                    warn!(error = %e, "could not parse landing page; continuing without title/bib/abstract");
+                    scrape::Landing::default()
+                })
+            }
             Err(e) => {
-                warn!(error = %e, "could not parse landing page; continuing without title/bib/abstract");
+                warn!(error = %e, "could not fetch landing page; continuing without title/bib/abstract");
                 scrape::Landing::default()
             }
         };
@@ -88,13 +95,9 @@ pub async fn ensure_version(
         if is_current {
             if let Some(bib) = &landing.bibtex {
                 tokio::fs::write(&paths.bib, bib).await?;
-            } else {
-                warn!("could not scrape BibTeX");
             }
             if let Some(abs) = &landing.abstract_ {
                 tokio::fs::write(&paths.abstract_, abs).await?;
-            } else {
-                warn!("could not scrape abstract");
             }
         }
 
@@ -105,7 +108,7 @@ pub async fn ensure_version(
             }
             cache::write_paper_meta(root, id, pm).await?;
         } else {
-            let mut pm = PaperMeta::for_first_fetch(version.clone());
+            let mut pm = PaperMeta::for_first_fetch(*version);
             pm.title = landing.title.clone();
             cache::write_paper_meta(root, id, &pm).await?;
         }
@@ -117,8 +120,6 @@ pub async fn ensure_version(
         mineru_version: None,
     };
     cache::write_version_meta(root, id, version, &vmeta).await?;
-
-    report.actions.push(if is_current { "fetched-pdf" } else { "fetched-historical-pdf" });
     Ok(())
 }
 

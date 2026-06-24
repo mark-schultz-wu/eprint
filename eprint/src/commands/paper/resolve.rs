@@ -39,9 +39,9 @@ pub async fn target_version(
             .items(&labels)
             .default(labels.len() - 1)
             .interact()?;
-        return Ok(Some(versions[idx].clone()));
+        return Ok(Some(versions[idx]));
     }
-    Ok(paper_meta.and_then(|p| p.current_version.clone()))
+    Ok(paper_meta.and_then(|p| p.current_version))
 }
 
 fn label_for(cx: &Context, id: PaperId, paper_meta: Option<&PaperMeta>, v: &Canonical) -> String {

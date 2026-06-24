@@ -60,7 +60,7 @@ impl PaperMeta {
     pub fn for_first_fetch(version: version::Canonical) -> Self {
         Self {
             tool: TOOL_TAG.into(),
-            current_version: Some(version.clone()),
+            current_version: Some(version),
             known_versions: vec![version],
             title: None,
         }
