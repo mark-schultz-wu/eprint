@@ -51,11 +51,27 @@ async fn run_ml_backend(cx: &Context, pdf_path: &std::path::Path) -> Result<Stri
     use crate::config::BackendKind;
     let cfg = &cx.cfg.ml;
     let conv: Box<dyn Converter> = match cfg.kind {
-        BackendKind::Local => Box::new(LocalConverter::default()),
+        BackendKind::Local => {
+            // The local backend shells out to MinerU on CPU, which runs for
+            // minutes on math-heavy papers and prints nothing. Without this
+            // notice it reads as a hang. (Suppressed under --json, like sync.)
+            if !cx.json {
+                eprintln!(
+                    "Converting with MinerU {} locally (CPU) — this can take several minutes \
+                     for math-heavy papers and shows no progress; it's working, not hung. \
+                     Set EPRINT_ML_BACKEND=remote + EPRINT_ML_ENDPOINT to offload.",
+                    papermd::local::MINERU_VERSION,
+                );
+            }
+            Box::new(LocalConverter::default())
+        }
         BackendKind::Remote => {
             let endpoint = cfg.endpoint.as_deref().ok_or_else(|| {
                 anyhow::anyhow!("EPRINT_ML_BACKEND=remote requires EPRINT_ML_ENDPOINT")
             })?;
+            if !cx.json {
+                eprintln!("Converting via remote ML endpoint {endpoint} …");
+            }
             let token = cfg.token_env.as_deref().and_then(|v| std::env::var(v).ok());
             let mut rc = RemoteConverter::new(endpoint)?;
             if let Some(t) = token { rc = rc.with_token(t); }
@@ -63,6 +79,9 @@ async fn run_ml_backend(cx: &Context, pdf_path: &std::path::Path) -> Result<Stri
         }
     };
     let result = conv.convert(pdf_path, Quality::Ml).await?;
+    if !cx.json {
+        eprintln!("  ML conversion finished in {:.0}s.", result.duration.as_secs_f64());
+    }
     Ok(result.markdown)
 }
 
