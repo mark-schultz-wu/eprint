@@ -164,13 +164,54 @@ pub async fn acquire(cx: &Context, req: &PdfRequest<'_>) -> Result<Acquired> {
         }
     }
 
-    anyhow::bail!(
-        "no source had {} version {}. Tried: [{}]. \
-         (eprint PDFs are normally delivered to the downloads dir {} by the \
-         companion watcher — is it running and the paper downloaded in a browser?)",
+    anyhow::bail!("{}", unavailable_message(cx, req, &tried))
+}
+
+/// Build the actionable error for when no source produced the PDF. eprint's PDF
+/// endpoint is Cloudflare-blocked (403) to non-browsers, so the fix is almost
+/// always "download it in a browser and drop it here" — so we spell out the
+/// exact URL and the exact path to save it as, rather than a vague hint.
+fn unavailable_message(cx: &Context, req: &PdfRequest<'_>, tried: &[String]) -> String {
+    use std::fmt::Write as _;
+    let mut m = format!(
+        "could not acquire a PDF for {} (version {}).\nSources tried: {}.\n\n",
         req.id,
         req.version,
         tried.join("; "),
-        cx.cfg.downloads_dir.display(),
-    )
+    );
+    if cx.offline {
+        let _ = write!(
+            m,
+            "Running with --offline, so network sources were skipped. To file this paper, \
+             download it in a browser and save it as:\n    {}\nthen re-run without --offline \
+             (or keep --offline once the file is in place).",
+            crate::downloads::expected_pdf_path(&cx.cfg.downloads_dir, req.id).display(),
+        );
+    } else if req.is_current {
+        let _ = write!(
+            m,
+            "eprint.iacr.org serves PDFs behind a Cloudflare challenge (HTTP 403), so they \
+             can't be fetched programmatically. To file this paper:\n  \
+             1. Open this URL in a browser and download the PDF:\n       {}\n  \
+             2. Save it as:\n       {}\n     \
+             (the companion watcher does this automatically when it's running).\n  \
+             3. Re-run this command.",
+            req.id.pdf_url(),
+            crate::downloads::expected_pdf_path(&cx.cfg.downloads_dir, req.id).display(),
+        );
+    } else {
+        // Historical version: the downloads source only serves the *current*
+        // PDF (it returns nothing for an older version), and eprint's /archive
+        // PDF endpoint is 403 too — so there is no working source today. Don't
+        // suggest dropping a file in the downloads dir; it wouldn't be used.
+        let _ = write!(
+            m,
+            "This is a historical version ({}). There's no working source for older versions \
+             yet: the downloads dir + watcher only ever deliver the *current* PDF, and \
+             eprint's /archive PDF endpoint is Cloudflare-blocked. Operate on the current \
+             version instead by dropping `--version`.",
+            req.version,
+        );
+    }
+    m
 }
