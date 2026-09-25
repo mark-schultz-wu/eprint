@@ -58,6 +58,10 @@ pub struct Context {
     pub cfg: Config,
     pub offline: bool,
     pub json: bool,
+    /// Where eprint lives; builds every request URL.
+    pub site: crate::iacr::site::Site,
+    /// One HTTP client for the whole run, so connections are reused.
+    pub http: reqwest::Client,
     /// Shared token-bucket rate limiter for all outbound HTTP. Built
     /// once in `main` from `cfg.network` (interval) and a small burst
     /// budget, then handed off so all callers serialize through it.

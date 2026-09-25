@@ -10,9 +10,8 @@ pub async fn run(cx: &Context, args: FeedArgs) -> Result<()> {
     if cx.offline {
         anyhow::bail!("--offline set; feed requires network");
     }
-    let url = build_url(&args);
-    let client = http::client(cx.cfg.network.contact.as_deref())?;
-    let body = http::get_text(&client, &cx.rate_limiter, &url).await?;
+    let url = build_url(&cx.site.rss_url(), &args);
+    let body = http::get_text(&cx.http, &cx.rate_limiter, &url).await?;
     let items = rss::parse_rss(&body).map_err(|e| anyhow::anyhow!("{e}"))?;
     let shown: Vec<&Item> = items.iter().take(args.limit).collect();
     if cx.json {
@@ -49,7 +48,7 @@ pub async fn run(cx: &Context, args: FeedArgs) -> Result<()> {
     Ok(())
 }
 
-fn build_url(args: &FeedArgs) -> String {
+fn build_url(rss_url: &str, args: &FeedArgs) -> String {
     let mut params: Vec<String> = Vec::new();
     if matches!(args.view, FeedView::New) {
         params.push("order=recent".into());
@@ -58,8 +57,8 @@ fn build_url(args: &FeedArgs) -> String {
         params.push(format!("category={}", c.as_query()));
     }
     if params.is_empty() {
-        rss::RSS_URL.into()
+        rss_url.to_owned()
     } else {
-        format!("{}?{}", rss::RSS_URL, params.join("&"))
+        format!("{rss_url}?{}", params.join("&"))
     }
 }

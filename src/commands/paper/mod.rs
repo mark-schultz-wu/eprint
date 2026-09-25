@@ -17,7 +17,6 @@ mod resolve;
 
 use crate::cache::{self, PaperMeta};
 use crate::cli::{Context, PaperArgs};
-use crate::iacr::http;
 use crate::iacr::oai;
 use crate::ids::version;
 use crate::ids::PaperId;
@@ -146,8 +145,7 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
         .and_then(|p| p.current_version.as_ref())
         .is_some();
     if !have_current && !cx.offline {
-        let client = http::client(cx.cfg.network.contact.as_deref())?;
-        match oai::get_record(&client, &cx.rate_limiter, id).await {
+        match oai::get_record(&cx.http, &cx.rate_limiter, &cx.site.oai_url(), id).await {
             Ok(Some(rec)) => match rec.datestamp.parse::<version::OaiDatestamp>() {
                 Ok(ds) => {
                     let cv: version::Canonical = (&ds).into();
@@ -196,7 +194,7 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
                 "neither the archive listing nor OAI-PMH yielded a version (see warnings above). \
                  \"OAI-PMH has no record\" usually means the id is wrong; check {}. Otherwise \
                  it's a network or rate-limit failure, so retry in a minute",
-                id.html_url(),
+                cx.site.landing_url(id),
             )
         };
         return Err(crate::exit::CommandFailure::NoVersionResolved(format!(

@@ -8,6 +8,7 @@
 //! | Var                          | Meaning                                                           |
 //! |------------------------------|-------------------------------------------------------------------|
 //! | `EPRINT_CACHE_DIR`           | cache root (default: OS cache dir + `/eprint`)                    |
+//! | `EPRINT_BASE_URL`            | eprint server (default `https://eprint.iacr.org`; for mirrors/tests) |
 //! | `EPRINT_CONTACT`             | contact appended to outbound `User-Agent`                         |
 //! | `EPRINT_MIN_INTERVAL_S`      | minimum seconds between outbound HTTP requests (default `2.0`)    |
 //! | `EPRINT_MD_DEVICE`           | Markdown converter device: `metal`, `cuda`, `cpu` (default: best built-in) |
@@ -32,6 +33,8 @@ pub struct Config {
 
 #[derive(Debug, Clone)]
 pub struct Network {
+    /// eprint server base URL; see [`crate::iacr::site`].
+    pub base_url: String,
     pub contact: Option<String>,
     pub min_interval_s: f64,
 }
@@ -48,6 +51,8 @@ impl Config {
         Self {
             cache_root: cache_root_from_env(),
             network: Network {
+                base_url: env_string("EPRINT_BASE_URL")
+                    .unwrap_or_else(|| crate::iacr::site::DEFAULT_BASE_URL.to_owned()),
                 contact: env_string("EPRINT_CONTACT"),
                 min_interval_s: env_f64("EPRINT_MIN_INTERVAL_S").unwrap_or(2.0),
             },

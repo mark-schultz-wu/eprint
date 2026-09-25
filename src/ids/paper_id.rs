@@ -10,27 +10,6 @@ pub struct PaperId {
 }
 
 impl PaperId {
-    pub fn html_url(&self) -> String {
-        format!("https://eprint.iacr.org/{}", self.canonical())
-    }
-
-    pub fn archive_url(&self) -> String {
-        format!(
-            "https://eprint.iacr.org/archive/versions/{}",
-            self.canonical()
-        )
-    }
-
-    /// URL for a specific historical version's PDF, using eprint's
-    /// `/archive/<year>/<num>/<unix-seconds>.pdf` form.
-    pub fn historical_pdf_url(&self, version: &crate::ids::version::Canonical) -> String {
-        format!(
-            "https://eprint.iacr.org/archive/{}/{}.pdf",
-            self.canonical(),
-            version.to_unix()
-        )
-    }
-
     /// eprint's canonical id, e.g. `2016/086` or `2024/1234`.
     ///
     /// eprint zero-pads the number to a **minimum of three digits** everywhere:
@@ -118,29 +97,22 @@ mod tests {
     }
 
     #[test]
-    fn urls_pad_number_to_min_three_digits() {
-        let id = PaperId {
-            year: 2020,
-            num: 18,
-        };
-        assert_eq!(id.canonical(), "2020/018");
-        assert_eq!(id.html_url(), "https://eprint.iacr.org/2020/018");
+    fn canonical_pads_number_to_min_three_digits() {
         assert_eq!(
-            id.archive_url(),
-            "https://eprint.iacr.org/archive/versions/2020/018"
-        );
-        let v: crate::ids::version::Canonical = "20200110T000000Z".parse().unwrap();
-        assert_eq!(
-            id.historical_pdf_url(&v),
-            "https://eprint.iacr.org/archive/2020/018/1578614400.pdf"
+            PaperId {
+                year: 2020,
+                num: 18
+            }
+            .canonical(),
+            "2020/018"
         );
         assert_eq!(
             PaperId {
                 year: 2024,
                 num: 1234
             }
-            .html_url(),
-            "https://eprint.iacr.org/2024/1234"
+            .canonical(),
+            "2024/1234"
         );
     }
 

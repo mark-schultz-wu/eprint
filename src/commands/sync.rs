@@ -9,7 +9,6 @@
 
 use crate::cache;
 use crate::cli::{Context, SyncArgs};
-use crate::iacr::http;
 use crate::iacr::oai;
 use crate::ids::version;
 use anyhow::Result;
@@ -93,8 +92,8 @@ async fn sync_impl(
     let from = effective_from(root, since, default_window_days).await;
     info!(from = %from, "starting OAI-PMH sync");
 
-    let client = http::client(cx.cfg.network.contact.as_deref())?;
-    let records = oai::list_records(&client, &cx.rate_limiter, Some(&from)).await?;
+    let records =
+        oai::list_records(&cx.http, &cx.rate_limiter, &cx.site.oai_url(), Some(&from)).await?;
 
     let updated = apply_records(root, &records).await?;
 

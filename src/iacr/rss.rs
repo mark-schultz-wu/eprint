@@ -16,8 +16,6 @@
 use quick_xml::events::Event;
 use quick_xml::Reader;
 
-pub const RSS_URL: &str = "https://eprint.iacr.org/rss/rss.xml";
-
 #[derive(Debug, Clone, Default)]
 pub struct Item {
     pub title: String,

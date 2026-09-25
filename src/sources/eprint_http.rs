@@ -2,6 +2,7 @@
 
 use super::{PdfRequest, PdfSource};
 use crate::iacr::http;
+use crate::iacr::site::Site;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -16,11 +17,12 @@ use std::sync::Arc;
 pub struct EprintHttpSource {
     client: reqwest::Client,
     rl: Arc<http::RateLimiter>,
+    site: Site,
 }
 
 impl EprintHttpSource {
-    pub fn new(client: reqwest::Client, rl: Arc<http::RateLimiter>) -> Self {
-        Self { client, rl }
+    pub fn new(client: reqwest::Client, rl: Arc<http::RateLimiter>, site: Site) -> Self {
+        Self { client, rl, site }
     }
 }
 
@@ -33,36 +35,8 @@ impl PdfSource for EprintHttpSource {
         true
     }
     async fn fetch(&self, req: &PdfRequest<'_>) -> Result<Option<Vec<u8>>> {
-        let bytes = http::get_bytes(&self.client, &self.rl, &pdf_url(req)).await?;
+        let url = self.site.version_pdf_url(req.id, req.version);
+        let bytes = http::get_bytes(&self.client, &self.rl, &url).await?;
         Ok(Some(bytes.to_vec()))
-    }
-}
-
-fn pdf_url(req: &PdfRequest<'_>) -> String {
-    req.id.historical_pdf_url(req.version)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::ids::PaperId;
-
-    /// Regression: every version, the current one included, is fetched by
-    /// its timestamp, so the bytes always match the version directory
-    /// they're saved in.
-    #[test]
-    fn fetches_by_exact_version() {
-        let version = "20250106T174348Z".parse().unwrap();
-        let req = PdfRequest {
-            id: PaperId {
-                year: 2024,
-                num: 463,
-            },
-            version: &version,
-        };
-        assert_eq!(
-            pdf_url(&req),
-            "https://eprint.iacr.org/archive/2024/463/1736185428.pdf"
-        );
     }
 }

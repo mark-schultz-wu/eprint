@@ -18,8 +18,6 @@ use quick_xml::Reader;
 use std::str::FromStr;
 use tracing::{info, info_span, Instrument};
 
-pub const BASE_URL: &str = "https://eprint.iacr.org/oai";
-
 /// One record's signal from the OAI-PMH response: which paper, and when
 /// did its metadata last change.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,12 +45,13 @@ pub struct PageResult {
 pub async fn list_records(
     client: &reqwest::Client,
     rl: &RateLimiter,
+    endpoint: &str,
     from: Option<&str>,
 ) -> Result<Vec<RecordHeader>> {
     let span = info_span!("oai_list_records", from = from.unwrap_or("(beginning)"));
     async {
         let mut out: Vec<RecordHeader> = Vec::new();
-        let mut url = first_url(from);
+        let mut url = first_url(endpoint, from);
         let mut page_num = 1u32;
         loop {
             let body = http::get_text(client, rl, &url).await?;
@@ -70,7 +69,7 @@ pub async fn list_records(
             match page.resumption_token {
                 Some(token) if !token.is_empty() => {
                     url = format!(
-                        "{BASE_URL}?verb=ListRecords&resumptionToken={}",
+                        "{endpoint}?verb=ListRecords&resumptionToken={}",
                         urlencode(&token)
                     );
                     page_num += 1;
@@ -84,8 +83,8 @@ pub async fn list_records(
     .await
 }
 
-fn first_url(from: Option<&str>) -> String {
-    let mut url = format!("{BASE_URL}?verb=ListRecords&metadataPrefix=oai_dc");
+fn first_url(endpoint: &str, from: Option<&str>) -> String {
+    let mut url = format!("{endpoint}?verb=ListRecords&metadataPrefix=oai_dc");
     if let Some(f) = from {
         url.push_str("&from=");
         url.push_str(&urlencode(f));
@@ -126,10 +125,11 @@ pub struct Record {
 pub async fn get_record(
     client: &reqwest::Client,
     rl: &RateLimiter,
+    endpoint: &str,
     id: PaperId,
 ) -> Result<Option<Record>> {
     let url = format!(
-        "{BASE_URL}?verb=GetRecord&identifier={}&metadataPrefix=oai_dc",
+        "{endpoint}?verb=GetRecord&identifier={}&metadataPrefix=oai_dc",
         id.oai_identifier()
     );
     let body = http::get_text(client, rl, &url).await?;

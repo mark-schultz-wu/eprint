@@ -83,9 +83,9 @@ pub async fn ensure_version(
         .is_some();
     let need_landing = (is_current || !have_title) && !cx.offline;
     if need_landing {
-        let client = http::client(cx.cfg.network.contact.as_deref())?;
-        let rl = &*cx.rate_limiter;
-        let landing = match http::get_text(&client, rl, &id.html_url()).await {
+        let landing = match http::get_text(&cx.http, &cx.rate_limiter, &cx.site.landing_url(id))
+            .await
+        {
             Ok(html) => {
                 report.add_downloaded(html.len() as u64);
                 landing::parse(&html).unwrap_or_else(|e| {

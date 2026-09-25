@@ -15,7 +15,6 @@
 mod eprint_http;
 
 use crate::cli::Context;
-use crate::iacr::http;
 use crate::ids::version::Canonical;
 use crate::ids::PaperId;
 use anyhow::Result;
@@ -58,16 +57,14 @@ pub trait PdfSource: Send + Sync {
 
 /// Build the ordered source list for this run. Order = priority.
 pub fn build_sources(cx: &Context) -> Vec<Box<dyn PdfSource>> {
-    let mut sources: Vec<Box<dyn PdfSource>> = Vec::new();
-    // S3RequesterPaysSource will be inserted here.
-    match http::client(cx.cfg.network.contact.as_deref()) {
-        Ok(client) => sources.push(Box::new(EprintHttpSource::new(
-            client,
+    vec![
+        // S3RequesterPaysSource will be inserted here.
+        Box::new(EprintHttpSource::new(
+            cx.http.clone(),
             cx.rate_limiter.clone(),
-        ))),
-        Err(e) => warn!(error = %e, "skipping eprint-http source: could not build HTTP client"),
-    }
-    sources
+            cx.site.clone(),
+        )),
+    ]
 }
 
 /// Acquire the PDF for `req` from the first source that has it.
@@ -121,7 +118,7 @@ fn unavailable_message(cx: &Context, req: &PdfRequest<'_>, tried: &[String]) -> 
              Re-run without --offline to fetch it."
         );
     } else {
-        let url = req.id.historical_pdf_url(req.version);
+        let url = cx.site.version_pdf_url(req.id, req.version);
         let _ = write!(
             m,
             "Fetching {url} failed (reason above). If eprint.iacr.org was rate-limiting, wait a \
