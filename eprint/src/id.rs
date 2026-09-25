@@ -11,41 +11,36 @@ pub struct PaperId {
 
 impl PaperId {
     pub fn pdf_url(&self) -> String {
-        format!("https://eprint.iacr.org/{}/{}.pdf", self.year, self.num)
+        format!("https://eprint.iacr.org/{}.pdf", self.canonical())
     }
 
     pub fn html_url(&self) -> String {
-        format!("https://eprint.iacr.org/{}/{}", self.year, self.num)
+        format!("https://eprint.iacr.org/{}", self.canonical())
     }
 
     pub fn archive_url(&self) -> String {
-        format!("https://eprint.iacr.org/archive/versions/{}/{}", self.year, self.num)
+        format!("https://eprint.iacr.org/archive/versions/{}", self.canonical())
     }
 
     /// URL for a specific historical version's PDF, using eprint's
     /// `/archive/<year>/<num>/<unix-seconds>.pdf` form.
     pub fn historical_pdf_url(&self, version: &crate::version::Canonical) -> String {
-        format!(
-            "https://eprint.iacr.org/archive/{}/{}/{}.pdf",
-            self.year,
-            self.num,
-            version.to_unix()
-        )
+        format!("https://eprint.iacr.org/archive/{}/{}.pdf", self.canonical(), version.to_unix())
     }
 
+    /// eprint's canonical id, e.g. `2016/086` or `2024/1234`.
+    ///
+    /// eprint zero-pads the number to a **minimum of three digits** everywhere:
+    /// landing pages, PDFs, archive listings, and OAI identifiers. The unpadded
+    /// form (`2016/86`) 404s on the web endpoints and returns `idDoesNotExist`
+    /// from OAI `GetRecord`, so anything below paper 100 would fail to resolve.
     pub fn canonical(&self) -> String {
-        format!("{}/{}", self.year, self.num)
+        format!("{}/{:03}", self.year, self.num)
     }
 
     /// OAI-PMH identifier for this paper, e.g. `oai:eprint.iacr.org:2016/086`.
-    ///
-    /// eprint zero-pads the number to a **minimum of three digits** in the OAI
-    /// identifier (`2009/001`, `2016/086`, but `2024/1234` unchanged) — unlike
-    /// the bare number used in landing-page/PDF URLs. Sending the unpadded form
-    /// (`2016/86`) to `GetRecord` returns `idDoesNotExist`, so anything below
-    /// paper 100 would silently fail to resolve.
     pub fn oai_identifier(&self) -> String {
-        format!("oai:eprint.iacr.org:{}/{:03}", self.year, self.num)
+        format!("oai:eprint.iacr.org:{}", self.canonical())
     }
 
     /// Subdirectory under the cache root: `<year>/<num:04>/`.
@@ -112,6 +107,18 @@ mod tests {
             assert_eq!(id.year, 2024);
             assert_eq!(id.num, 463);
         }
+    }
+
+    #[test]
+    fn urls_pad_number_to_min_three_digits() {
+        let id = PaperId { year: 2020, num: 18 };
+        assert_eq!(id.canonical(), "2020/018");
+        assert_eq!(id.pdf_url(), "https://eprint.iacr.org/2020/018.pdf");
+        assert_eq!(id.html_url(), "https://eprint.iacr.org/2020/018");
+        assert_eq!(id.archive_url(), "https://eprint.iacr.org/archive/versions/2020/018");
+        let v: crate::version::Canonical = "20200110T000000Z".parse().unwrap();
+        assert_eq!(id.historical_pdf_url(&v), "https://eprint.iacr.org/archive/2020/018/1578614400.pdf");
+        assert_eq!(PaperId { year: 2024, num: 1234 }.pdf_url(), "https://eprint.iacr.org/2024/1234.pdf");
     }
 
     #[test]
