@@ -6,6 +6,7 @@ mod cli;
 mod commands;
 mod config;
 mod downloads;
+mod exit;
 mod feed;
 mod id;
 mod net;
@@ -34,12 +35,21 @@ async fn main() -> Result<()> {
     }
     let rate_limiter = net::rate_limiter(cfg.network.min_interval_s, 3);
     let cx = cli::Context { cfg, offline: args.offline, json: args.json, rate_limiter };
-    match args.command {
+    let result = match args.command {
         cli::Command::Paper(c) => commands::paper::run(&cx, c).await,
         cli::Command::Sync(c) => commands::sync::run(&cx, c).await,
         cli::Command::Feed(c) => commands::feed::run(&cx, c).await,
         cli::Command::Cache(c) => commands::cache_cmd::run(&cx, c).await,
+    };
+    // Map typed failures to distinct, scriptable exit codes. Printing/exiting
+    // here (rather than returning the Result for anyhow's Termination) is what
+    // lets a caller branch on the *reason* — independent of the trace level,
+    // which may have suppressed the corresponding warning.
+    if let Err(e) = result {
+        eprintln!("Error: {e:#}");
+        std::process::exit(exit::CommandFailure::code_of(&e));
     }
+    Ok(())
 }
 
 fn init_tracing(verbose: u8, format: cli::LogFormat) {

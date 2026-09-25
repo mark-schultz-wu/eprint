@@ -12,10 +12,10 @@ use crate::net;
 use crate::scrape;
 use crate::source;
 use crate::version::Canonical;
-use crate::commands::paper::PaperReport;
+use crate::commands::paper::ReportBuilder;
 use anyhow::Result;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::warn;
+use tracing::{debug, warn};
 
 /// Ensure `<root>/<id>/<version>/paper.pdf` exists. Acquires it if missing.
 /// Updates per-version + paper-level meta on success.
@@ -24,7 +24,7 @@ pub async fn ensure_version(
     id: PaperId,
     version: &Canonical,
     paper_meta: Option<&mut PaperMeta>,
-    report: &mut PaperReport,
+    report: &mut ReportBuilder,
 ) -> Result<()> {
     let root = &cx.cfg.cache_root;
     let paths = cache::version_paths(root, id, version);
@@ -35,10 +35,15 @@ pub async fn ensure_version(
 
     // Is this the paper's current version? Some sources (the downloads dir)
     // only ever hold the current PDF; historical versions come from elsewhere.
-    let is_current = paper_meta
-        .as_deref()
-        .and_then(|p| p.current_version.as_ref())
-        == Some(version);
+    let current = paper_meta.as_deref().and_then(|p| p.current_version.as_ref());
+    let is_current = current == Some(version);
+    debug!(
+        id = %id,
+        target_version = %version,
+        current_version = ?current,
+        is_current,
+        "resolving PDF source eligibility (is_current gates the downloads source)"
+    );
 
     // Pull the bytes from the first source that has them.
     let acquired = source::acquire(cx, &source::PdfRequest { id, version, is_current }).await?;
@@ -52,9 +57,9 @@ pub async fn ensure_version(
     );
     tokio::fs::write(&paths.pdf, &acquired.bytes).await?;
     if acquired.network {
-        report.bytes_downloaded += acquired.bytes.len() as u64;
+        report.add_downloaded(acquired.bytes.len() as u64);
     }
-    report.actions.push(match acquired.source {
+    report.action(match acquired.source {
         "downloads" => "pdf-from-downloads",
         _ if is_current => "fetched-pdf",
         _ => "fetched-historical-pdf",
@@ -80,7 +85,7 @@ pub async fn ensure_version(
         let rl = &*cx.rate_limiter;
         let landing = match net::get_text(&client, rl, &id.html_url()).await {
             Ok(html) => {
-                report.bytes_downloaded += html.len() as u64;
+                report.add_downloaded(html.len() as u64);
                 scrape::parse(&html).unwrap_or_else(|e| {
                     warn!(error = %e, "could not parse landing page; continuing without title/bib/abstract");
                     scrape::Landing::default()

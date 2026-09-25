@@ -18,10 +18,8 @@ pub async fn print(cx: &Context, args: &PaperArgs, report: &PaperReport) -> Resu
     if let Some(v) = &report.current_version {
         println!("  current version: {v}");
     }
-    if let Some(v) = &report.resolved_version {
-        if Some(v) != report.current_version.as_ref() {
-            println!("  resolved to:     {v}");
-        }
+    if Some(&report.resolved_version) != report.current_version.as_ref() {
+        println!("  resolved to:     {}", report.resolved_version);
     }
     if !report.known_versions.is_empty() {
         let total = report.known_versions.len();
@@ -49,15 +47,14 @@ pub async fn print(cx: &Context, args: &PaperArgs, report: &PaperReport) -> Resu
         println!("  bytes:           {}", report.bytes_downloaded);
     }
     if !args.no_abstract {
-        if let Some(v) = &report.resolved_version {
-            let id: PaperId = args.id.parse()?;
-            let abstract_path = cache::version_paths(&cx.cfg.cache_root, id, v).abstract_;
-            if let Ok(abs) = tokio::fs::read_to_string(&abstract_path).await {
-                println!();
-                println!("Abstract:");
-                for line in abs.lines() {
-                    println!("  {line}");
-                }
+        let id: PaperId = args.id.parse()?;
+        let abstract_path =
+            cache::version_paths(&cx.cfg.cache_root, id, &report.resolved_version).abstract_;
+        if let Ok(abs) = tokio::fs::read_to_string(&abstract_path).await {
+            println!();
+            println!("Abstract:");
+            for line in abs.lines() {
+                println!("  {line}");
             }
         }
     }

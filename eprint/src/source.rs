@@ -23,7 +23,7 @@ use anyhow::{Context as _, Result};
 use async_trait::async_trait;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// What the caller wants: a specific version of a paper's PDF.
 pub struct PdfRequest<'a> {
@@ -66,17 +66,40 @@ impl PdfSource for DownloadsSource {
         false
     }
     async fn fetch(&self, req: &PdfRequest<'_>) -> Result<Option<Vec<u8>>> {
+        let expected = crate::downloads::expected_pdf_path(&self.dir, req.id);
+        let present = expected.is_file();
         if !req.is_current {
-            return Ok(None); // the dir only carries the current PDF
+            // The dir only carries the *current* PDF. If a file is nonetheless
+            // sitting at the expected path, say so loudly: it's a local PDF
+            // that exists but won't be used, which otherwise reads downstream
+            // as a flat "downloads (not available)" — the exact confusion that
+            // makes a FAIL look like a missing file when it isn't.
+            if present {
+                warn!(
+                    id = %req.id,
+                    requested_version = %req.version,
+                    path = %expected.display(),
+                    "downloads dir holds a PDF for this id, but the requested version isn't \
+                     the current one — the downloads source only serves the current PDF, so \
+                     it is NOT being used. Operate on the current version (drop --version)."
+                );
+            } else {
+                debug!(id = %req.id, "downloads: requested version isn't current; skipping (dir only holds current)");
+            }
+            return Ok(None);
         }
         match crate::downloads::local_pdf(&self.dir, req.id) {
             Some(path) => {
                 let bytes = tokio::fs::read(&path)
                     .await
                     .with_context(|| format!("reading downloaded PDF {}", path.display()))?;
+                info!(id = %req.id, path = %path.display(), bytes = bytes.len(), "downloads: using local PDF");
                 Ok(Some(bytes))
             }
-            None => Ok(None),
+            None => {
+                debug!(id = %req.id, expected = %expected.display(), "downloads: no file at expected path");
+                Ok(None)
+            }
         }
     }
 }
@@ -164,7 +187,7 @@ pub async fn acquire(cx: &Context, req: &PdfRequest<'_>) -> Result<Acquired> {
         }
     }
 
-    anyhow::bail!("{}", unavailable_message(cx, req, &tried))
+    Err(crate::exit::CommandFailure::PdfUnavailable(unavailable_message(cx, req, &tried)).into())
 }
 
 /// Build the actionable error for when no source produced the PDF. eprint's PDF

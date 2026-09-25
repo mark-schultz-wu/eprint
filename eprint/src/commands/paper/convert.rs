@@ -6,17 +6,17 @@ use crate::cache;
 use crate::cli::Context;
 use crate::id::PaperId;
 use crate::version::Canonical;
-use crate::commands::paper::PaperReport;
+use crate::commands::paper::ReportBuilder;
 use anyhow::{Context as _, Result};
 use papermd::{Converter, LocalConverter, Quality, RemoteConverter};
-use tracing::info;
+use tracing::{debug, info, warn};
 
 pub async fn maybe_run(
     cx: &Context,
     id: PaperId,
     version: &Canonical,
     quality: Quality,
-    report: &mut PaperReport,
+    report: &mut ReportBuilder,
 ) -> Result<()> {
     let root = &cx.cfg.cache_root;
     let paths = cache::version_paths(root, id, version);
@@ -29,10 +29,33 @@ pub async fn maybe_run(
     let markdown = match quality {
         Quality::Text => {
             let pdf_path = paths.pdf.clone();
-            tokio::task::spawn_blocking(move || pdf_extract::extract_text(&pdf_path))
-                .await
-                .context("pdf-extract task panicked")?
-                .context("pdf-extract failed")?
+            debug!(id = %id, version = %version, pdf = %pdf_path.display(), "extracting text (pdf-extract)");
+            let text = tokio::task::spawn_blocking({
+                let pdf_path = pdf_path.clone();
+                move || pdf_extract::extract_text(&pdf_path)
+            })
+            .await
+            .context("pdf-extract task panicked")?
+            .with_context(|| format!("pdf-extract failed on {}", pdf_path.display()))?;
+            // pdf-extract can "succeed" with no text on scanned/image-only PDFs.
+            // Writing that empty .md and ratcheting md_quality to "text" would
+            // mask the real problem (no extractable text layer) behind exit 0.
+            // Fail hard with a coded error so callers can detect it and retry
+            // with ML/OCR — independent of whether the warn below is visible.
+            if text.trim().is_empty() {
+                warn!(
+                    id = %id, version = %version, pdf = %pdf_path.display(),
+                    "pdf-extract produced no text — likely a scanned/image-only PDF"
+                );
+                return Err(crate::exit::CommandFailure::EmptyConversion(format!(
+                    "pdf-extract produced no text for {id} version {version} ({}); \
+                     it's likely a scanned/image-only PDF with no text layer. \
+                     Re-run with --md ml for OCR-quality conversion.",
+                    pdf_path.display(),
+                ))
+                .into());
+            }
+            text
         }
         Quality::Ml => run_ml_backend(cx, &paths.pdf).await?,
     };
@@ -43,7 +66,7 @@ pub async fn maybe_run(
         vmeta.mineru_version = Some(papermd::local::MINERU_VERSION.to_owned());
     }
     cache::write_version_meta(root, id, version, &vmeta).await?;
-    report.actions.push(if quality == Quality::Text { "converted-text" } else { "converted-ml" });
+    report.action(if quality == Quality::Text { "converted-text" } else { "converted-ml" });
     Ok(())
 }
 
