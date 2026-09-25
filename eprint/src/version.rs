@@ -62,7 +62,7 @@ impl Canonical {
     /// Unix seconds (UTC). Total: the wrapper's invariant (year ≥ 1970,
     /// enforced in every constructor) guarantees the underlying
     /// `OffsetDateTime`'s `unix_timestamp()` is non-negative.
-    pub fn to_unix(&self) -> u64 {
+    pub fn to_unix(self) -> u64 {
         // `unix_timestamp` returns i64; for year ≥ 1970 it's ≥ 0.
         u64::try_from(self.0.unix_timestamp()).expect("year >= 1970 invariant")
     }

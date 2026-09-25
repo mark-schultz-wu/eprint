@@ -120,6 +120,23 @@ impl LocalConverter {
     }
 }
 
+fn find_md(root: &Path, stem: &str) -> Option<PathBuf> {
+    let target_name = format!("{stem}.md");
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&p) else { continue };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.file_name().is_some_and(|n| n == target_name.as_str()) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -138,21 +155,4 @@ mod tests {
             other => panic!("expected BackendUnavailable, got {other:?}"),
         }
     }
-}
-
-fn find_md(root: &Path, stem: &str) -> Option<PathBuf> {
-    let target_name = format!("{stem}.md");
-    let mut stack = vec![root.to_path_buf()];
-    while let Some(p) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&p) else { continue };
-        for entry in rd.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                stack.push(path);
-            } else if path.file_name().is_some_and(|n| n == target_name.as_str()) {
-                return Some(path);
-            }
-        }
-    }
-    None
 }
