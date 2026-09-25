@@ -262,6 +262,9 @@ mod tests {
             !backing_off(NOW, ago(5), ago(10)),
             "a later success clears it"
         );
+        // Stamps have one-second resolution: a success recorded in the same
+        // second as the failure counts as the later event.
+        assert!(!backing_off(NOW, ago(10), ago(10)));
     }
 
     #[test]
