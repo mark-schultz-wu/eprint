@@ -55,11 +55,12 @@ fn init_tracing(verbose: u8, format: cli::LogFormat) {
     let env_value = std::env::var(EnvFilter::DEFAULT_ENV).ok();
     let filter = build_log_filter(verbose, env_value.as_deref());
     let registry = tracing_subscriber::registry().with(filter);
+    // Logs go to stderr: stdout carries the command's output (e.g. --json),
+    // which a warning must never corrupt.
+    let layer = tracing_subscriber::fmt::layer().with_writer(std::io::stderr);
     match format {
-        cli::LogFormat::Pretty => registry.with(tracing_subscriber::fmt::layer()).init(),
-        cli::LogFormat::Json => registry
-            .with(tracing_subscriber::fmt::layer().json())
-            .init(),
+        cli::LogFormat::Pretty => registry.with(layer).init(),
+        cli::LogFormat::Json => registry.with(layer.json()).init(),
     }
 }
 
