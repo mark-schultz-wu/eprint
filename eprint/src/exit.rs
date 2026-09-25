@@ -25,8 +25,8 @@ pub enum CommandFailure {
     #[error("{0}")]
     PdfUnavailable(String),
 
-    /// Conversion ran but yielded no usable Markdown (e.g. pdf-extract found no
-    /// text layer on a scanned/image-only PDF).
+    /// Conversion ran but yielded no usable Markdown (the model found no
+    /// content on any page, e.g. a blank or unrenderable PDF).
     #[error("{0}")]
     EmptyConversion(String),
 }

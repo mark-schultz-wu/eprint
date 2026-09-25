@@ -6,7 +6,6 @@
 
 use crate::config::Config;
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use papermd::Quality;
 
 /// Fetch, describe, and convert IACR ePrint papers.
 #[derive(Debug, Parser)]
@@ -75,30 +74,16 @@ pub struct PaperArgs {
     /// Open an interactive picker over known versions.
     #[arg(long)]
     pub select_version: bool,
-    /// Also produce Markdown. With no value, defaults to text-quality.
-    #[arg(long, value_enum, num_args = 0..=1, default_missing_value = "text")]
-    pub md: Option<MdQuality>,
+    /// Also produce Markdown (math as LaTeX) with MinerU2.5-Pro. Slow: about
+    /// half a minute per page on a GPU. Downloads a 2.3 GB model on first use.
+    #[arg(long)]
+    pub md: bool,
     /// Skip the staleness check; always hit the network.
     #[arg(long)]
     pub force: bool,
     /// Skip printing the abstract at the bottom of the human-readable output.
     #[arg(long)]
     pub no_abstract: bool,
-}
-
-impl PaperArgs {
-    pub fn md_quality(&self) -> Option<Quality> {
-        self.md.map(|q| match q {
-            MdQuality::Text => Quality::Text,
-            MdQuality::Ml => Quality::Ml,
-        })
-    }
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum MdQuality {
-    Text,
-    Ml,
 }
 
 #[derive(Debug, Args)]

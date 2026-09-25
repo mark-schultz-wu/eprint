@@ -72,12 +72,12 @@ impl PaperMeta {
 pub struct VersionMeta {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fetched_unix_s: Option<i64>,
-    /// "text" or "ml"; `None` if `paper.md` hasn't been generated.
+    /// [`crate::markdown::CONVERTER_ID`] of the converter that produced
+    /// `paper.md`; `None` if it hasn't been generated. (Older caches carried
+    /// `md_quality` / `mineru_version` instead; serde ignores those, so such
+    /// Markdown reads as stale and is regenerated.)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub md_quality: Option<String>,
-    /// MinerU version used to produce `paper.md`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub mineru_version: Option<String>,
+    pub md_converter: Option<String>,
 }
 
 pub fn paper_dir(root: &Path, id: PaperId) -> PathBuf {

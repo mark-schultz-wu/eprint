@@ -37,8 +37,8 @@ pub async fn print(cx: &Context, args: &PaperArgs, report: &PaperReport) -> Resu
             println!("{v}{tag_str}");
         }
     }
-    if let Some(q) = &report.md_quality {
-        println!("  markdown:        {q}");
+    if let Some(c) = &report.md_converter {
+        println!("  markdown:        {}/paper.md ({c})", report.directory);
     }
     if !report.actions.is_empty() {
         println!("  did:             {}", report.actions.join(", "));

@@ -8,6 +8,7 @@ mod config;
 mod exit;
 mod feed;
 mod id;
+mod markdown;
 mod net;
 mod oai;
 mod scrape;
@@ -65,7 +66,7 @@ fn build_log_filter(verbose: u8, env_value: Option<&str>) -> EnvFilter {
         2 => "debug",
         _ => "trace",
     };
-    let mut filter = EnvFilter::new(format!("eprint={default_level},papermd={default_level}"));
+    let mut filter = EnvFilter::new(format!("eprint={default_level}"));
     if let Some(env_filter) = env_value {
         for directive in env_filter.split(',') {
             if let Ok(parsed) = directive.parse() {
@@ -84,7 +85,6 @@ mod tests {
     fn default_filter_carries_verbosity() {
         let s = format!("{}", build_log_filter(0, None));
         assert!(s.contains("eprint=warn"));
-        assert!(s.contains("papermd=warn"));
     }
 
     #[test]

@@ -10,9 +10,7 @@
 //! | `EPRINT_CACHE_DIR`           | cache root (default: `$XDG_CACHE_HOME/eprint`)                    |
 //! | `EPRINT_CONTACT`             | contact appended to outbound `User-Agent`                         |
 //! | `EPRINT_MIN_INTERVAL_S`      | minimum seconds between outbound HTTP requests (default `2.0`)    |
-//! | `EPRINT_ML_BACKEND`          | `local` (default) or `remote`                                     |
-//! | `EPRINT_ML_ENDPOINT`         | base URL for `remote` backend                                     |
-//! | `EPRINT_ML_TOKEN_ENV`        | name of env var holding bearer token for `remote` backend         |
+//! | `EPRINT_MD_DEVICE`           | Markdown converter device: `metal`, `cuda`, `cpu` (default: best built-in) |
 //! | `EPRINT_AUTO_SYNC`           | `true` (default) / `false` — auto-run OAI-PMH sync on staleness   |
 //! | `EPRINT_SYNC_STALE_HOURS`    | hours after which the cache is considered stale (default `24`)    |
 //!
@@ -25,7 +23,8 @@ use std::path::PathBuf;
 pub struct Config {
     pub cache_root: PathBuf,
     pub network: Network,
-    pub ml: Backend,
+    /// `EPRINT_MD_DEVICE`; `None` means [`crate::markdown::default_device`].
+    pub md_device: Option<String>,
     pub sync: Sync,
 }
 
@@ -33,19 +32,6 @@ pub struct Config {
 pub struct Network {
     pub contact: Option<String>,
     pub min_interval_s: f64,
-}
-
-#[derive(Debug, Clone)]
-pub struct Backend {
-    pub kind: BackendKind,
-    pub endpoint: Option<String>,
-    pub token_env: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BackendKind {
-    Local,
-    Remote,
 }
 
 #[derive(Debug, Clone)]
@@ -63,17 +49,7 @@ impl Config {
                 contact: env_string("EPRINT_CONTACT"),
                 min_interval_s: env_f64("EPRINT_MIN_INTERVAL_S").unwrap_or(2.0),
             },
-            ml: Backend {
-                kind: env_string("EPRINT_ML_BACKEND")
-                    .and_then(|s| match s.as_str() {
-                        "local" => Some(BackendKind::Local),
-                        "remote" => Some(BackendKind::Remote),
-                        _ => None,
-                    })
-                    .unwrap_or(BackendKind::Local),
-                endpoint: env_string("EPRINT_ML_ENDPOINT"),
-                token_env: env_string("EPRINT_ML_TOKEN_ENV"),
-            },
+            md_device: env_string("EPRINT_MD_DEVICE"),
             sync: Sync {
                 auto: env_bool("EPRINT_AUTO_SYNC").unwrap_or(true),
                 stale_after_hours: env_u32("EPRINT_SYNC_STALE_HOURS").unwrap_or(24),

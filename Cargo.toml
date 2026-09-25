@@ -1,9 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["eprint", "papermd"]
+members = ["eprint"]
 
 [workspace.package]
 edition = "2021"
+# oar-ocr-vl (the Markdown converter) needs 1.95.
+rust-version = "1.95"
 license = "Apache-2.0"
 authors = ["Mark Schultz-Wu <mark@schultz-wu.com>"]
 repository = "https://github.com/mark-schultz-wu/eprint"

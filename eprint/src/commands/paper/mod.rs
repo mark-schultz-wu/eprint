@@ -2,7 +2,7 @@
 //!
 //! Orchestrates submodules: [`archive`] (eprint version listing),
 //! [`resolve`] (choose which version), [`fetch_one`] (download a
-//! specific version), [`convert`] (run papermd on the PDF), [`emit`]
+//! specific version), [`convert`] (PDF → Markdown), [`emit`]
 //! (format output).
 //!
 //! `run` is intentionally thin: it sequences the steps and threads a
@@ -42,7 +42,8 @@ pub struct PaperReport {
     pub directory: String,
     pub known_versions: Vec<crate::version::Canonical>,
     pub cached_versions: Vec<crate::version::Canonical>,
-    pub md_quality: Option<String>,
+    /// Converter that produced the cached `paper.md`, if there is one.
+    pub md_converter: Option<String>,
     pub bytes_downloaded: u64,
     pub actions: Vec<&'static str>,
 }
@@ -77,7 +78,7 @@ impl ReportBuilder {
     /// Finish into a [`PaperReport`] now that a version is resolved. The caller
     /// can't reach this without a `Canonical`, which is exactly why the
     /// report's `resolved_version`/`directory` are non-`Option`. The remaining
-    /// metadata fields (title, versions, md_quality) default to empty and are
+    /// metadata fields (title, versions, md_converter) default to empty and are
     /// set by the caller afterwards.
     pub fn resolve(self, version: crate::version::Canonical, directory: String) -> PaperReport {
         PaperReport {
@@ -88,7 +89,7 @@ impl ReportBuilder {
             directory,
             known_versions: Vec::new(),
             cached_versions: Vec::new(),
-            md_quality: None,
+            md_converter: None,
             bytes_downloaded: self.bytes_downloaded,
             actions: self.actions,
         }
@@ -202,8 +203,8 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     }
 
     // 4. Optional markdown conversion (still just appends to the running log).
-    if let Some(quality) = args.md_quality() {
-        convert::maybe_run(cx, id, &version, quality, &mut report).await?;
+    if args.md {
+        convert::maybe_run(cx, id, &version, &mut report).await?;
     }
 
     // 5. Finalize: a version is resolved, so build the report and fill in the
@@ -217,7 +218,7 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
         report.known_versions = pm.known_versions.clone();
     }
     report.cached_versions = cache::existing_versions(root, id);
-    report.md_quality = cache::read_version_meta(root, id, &version).await.md_quality;
+    report.md_converter = cache::read_version_meta(root, id, &version).await.md_converter;
 
     emit::print(cx, &args, &report).await?;
     Ok(())

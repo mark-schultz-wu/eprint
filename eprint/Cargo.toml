@@ -3,13 +3,12 @@ name = "eprint"
 version = "0.1.0"
 description = "Fetch and convert IACR ePrint papers."
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
 [dependencies]
-papermd = { path = "../papermd" }
-
 clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -28,13 +27,29 @@ time = { workspace = true }
 # Interactive picker for --select-version
 dialoguer = "0.11"
 
-# Pure-Rust text-only extraction
-pdf-extract = "0.10"
+# PDF -> Markdown: pure-Rust page rasterizer + MinerU2.5-Pro VLM (Candle).
+hayro = "0.7"
+image = { version = "0.25", default-features = false }
+# Pinned to the commit benchmarked against eprint papers; its MinerU two-step
+# page parser (`MinerU::parse_page`) isn't in a crates.io release yet (0.9.2 has it
+# only as an example). TODO: switch to the crates.io release once 0.9.3 is out.
+oar-ocr-vl = { git = "https://github.com/GreatV/oar-ocr", rev = "2c4ab86733bc6efe4eee988e339194f60f188f66" }
+# Streaming model-weights download + integrity check.
+futures-util = "0.3"
+sha2 = "0.10"
 
 # XDG paths
 dirs = "5"
 # Polite User-Agent + minimal HTML scraping for abstract/bibtex
 regex = "1"
+
+# Apple GPU (Metal) acceleration is always on for macOS builds.
+[target.'cfg(target_os = "macos")'.dependencies]
+oar-ocr-vl = { git = "https://github.com/GreatV/oar-ocr", rev = "2c4ab86733bc6efe4eee988e339194f60f188f66", features = ["metal"] }
+
+[features]
+# NVIDIA GPU acceleration for the Markdown converter (opt-in; needs a CUDA toolkit).
+cuda = ["oar-ocr-vl/cuda"]
 
 [dev-dependencies]
 tempfile = "3"

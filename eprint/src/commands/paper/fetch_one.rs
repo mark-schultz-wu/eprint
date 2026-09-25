@@ -115,11 +115,7 @@ pub async fn ensure_version(
         }
     }
 
-    let vmeta = VersionMeta {
-        fetched_unix_s: Some(now_unix()),
-        md_quality: None,
-        mineru_version: None,
-    };
+    let vmeta = VersionMeta { fetched_unix_s: Some(now_unix()), md_converter: None };
     cache::write_version_meta(root, id, version, &vmeta).await?;
     Ok(())
 }
