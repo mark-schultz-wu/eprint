@@ -138,6 +138,22 @@ pub struct PaperArgs {
     /// Skip printing the abstract at the bottom of the human-readable output.
     #[arg(long)]
     pub no_abstract: bool,
+    /// Print just this to stdout instead of the report, e.g. to pipe the
+    /// paper elsewhere: `md` (implies --md), `bib`, `abstract`, or `pdf-path`.
+    #[arg(long, value_enum, value_name = "WHAT")]
+    pub print: Option<PrintWhat>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum PrintWhat {
+    /// The Markdown conversion.
+    Md,
+    /// The BibTeX entry.
+    Bib,
+    /// The abstract.
+    Abstract,
+    /// The path of the cached PDF.
+    PdfPath,
 }
 
 #[derive(Debug, Args)]

@@ -1,11 +1,12 @@
 //! Print a [`PaperReport`] in either human-readable or JSON form.
 
 use crate::cache;
-use crate::cli::{Context, PaperArgs};
+use crate::cli::{Context, PaperArgs, PrintWhat};
 use crate::commands::format::fmt_bytes;
 use crate::commands::paper::PaperReport;
+use crate::ids::version::Canonical;
 use crate::ids::PaperId;
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 
 pub async fn print(cx: &Context, args: &PaperArgs, report: &PaperReport) -> Result<()> {
     if cx.json {
@@ -63,6 +64,45 @@ pub async fn print(cx: &Context, args: &PaperArgs, report: &PaperReport) -> Resu
         }
     }
     Ok(())
+}
+
+/// Write one cached artifact to stdout (`--print`). A missing artifact is an
+/// error, not empty output, so a pipeline doesn't silently get nothing.
+pub async fn print_artifact(
+    cx: &Context,
+    id: PaperId,
+    version: &Canonical,
+    what: PrintWhat,
+) -> Result<()> {
+    let paths = cache::version_paths(&cx.cfg.cache_root, id, version);
+    let (path, name) = match what {
+        PrintWhat::PdfPath => {
+            println!("{}", paths.pdf.display());
+            return Ok(());
+        }
+        PrintWhat::Md => (&paths.md, "Markdown"),
+        PrintWhat::Bib => (&paths.bib, "BibTeX entry"),
+        PrintWhat::Abstract => (&paths.abstract_, "abstract"),
+    };
+    match tokio::fs::read_to_string(path).await {
+        Ok(text) => {
+            print!("{text}");
+            if !text.ends_with('\n') {
+                println!();
+            }
+            Ok(())
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            let why = if what == PrintWhat::Md {
+                ""
+            } else {
+                " (eprint's landing page describes only the current version, so older \
+                 versions have none)"
+            };
+            anyhow::bail!("no {name} cached for {id} version {version}{why}")
+        }
+        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+    }
 }
 
 /// One `  label:  value` line, values aligned in a column.

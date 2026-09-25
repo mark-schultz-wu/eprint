@@ -20,6 +20,7 @@ eprint 2024/463                         # metadata, PDF, BibTeX, abstract → ca
 eprint 2024/463 --md                    # … plus Markdown (see below)
 eprint 2024/463 --at 20240319T143540Z   # a specific (e.g. older) version
 eprint 2024/463 --select-version        # pick a version interactively
+eprint 2024/463 --print md | less       # just the Markdown (or bib, abstract, pdf-path)
 eprint sync                             # OAI-PMH refresh of cached papers' versions
 eprint feed [new|updates] --category publickey
 eprint cache {path,list,clear}          # clear keeps the Markdown model; --models drops it

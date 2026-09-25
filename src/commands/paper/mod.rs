@@ -16,7 +16,7 @@ mod known_versions;
 mod resolve;
 
 use crate::cache::{self, PaperMeta};
-use crate::cli::{Context, PaperArgs};
+use crate::cli::{Context, PaperArgs, PrintWhat};
 use crate::iacr::oai;
 use crate::ids::version;
 use crate::ids::PaperId;
@@ -105,6 +105,10 @@ impl ReportBuilder {
 
 pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     let id: PaperId = args.id.parse().context("parsing paper id")?;
+    anyhow::ensure!(
+        !(cx.json && args.print.is_some()),
+        "--print writes the raw artifact; it can't be combined with --json"
+    );
     // Auto-sync only refreshes staleness hints; a failure (OAI down,
     // rate-limited) mustn't stop us from serving the paper.
     if let Err(e) = crate::commands::sync::maybe_auto_sync(cx).await {
@@ -221,8 +225,13 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     }
 
     // 4. Optional markdown conversion (still just appends to the running log).
-    if args.md {
+    if args.md || args.print == Some(PrintWhat::Md) {
         convert::maybe_run(cx, id, &version, &mut report).await?;
+    }
+
+    // 4b. `--print`: just the artifact, for piping; no report.
+    if let Some(what) = args.print {
+        return emit::print_artifact(cx, id, &version, what).await;
     }
 
     // 5. Finalize: a version is resolved, so build the report and fill in the

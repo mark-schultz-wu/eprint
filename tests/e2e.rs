@@ -811,3 +811,59 @@ async fn cache_clear_with_no_model_and_no_foreign_dirs() {
     assert!(!text.contains("left in place"), "{text}");
     assert!(!text.contains("Markdown model"), "{text}");
 }
+
+/// `--print` writes exactly the requested artifact to stdout, nothing else,
+/// and fails loudly when it doesn't exist.
+#[tokio::test(flavor = "multi_thread")]
+async fn print_writes_only_the_requested_artifact() {
+    let h = Harness::new().await;
+    h.serve_paper(&[(V1, V1_UNIX, PDF_V1), (V2, V2_UNIX, PDF_V2)])
+        .await;
+
+    let out = h.run(&[ID, "--print", "bib"], &[]).await;
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(
+        stdout(&out),
+        "@misc{cryptoeprint:2024/463, title = {Security Guidelines}}\n"
+    );
+    let out = h.run(&[ID, "--print", "abstract"], &[]).await;
+    assert_eq!(
+        stdout(&out),
+        "Fully Homomorphic Encryption is a cryptographic primitive.\n"
+    );
+    let out = h.run(&[ID, "--print", "pdf-path"], &[]).await;
+    let pdf = h.version_dir(V2).join("paper.pdf");
+    assert_eq!(stdout(&out), format!("{}\n", pdf.display()));
+    assert_eq!(read(&pdf), PDF_V2);
+
+    // An older version has no abstract (the landing page describes only
+    // the current one): an error, not empty output.
+    let out = h.run(&[ID, "--at", V1, "--print", "abstract"], &[]).await;
+    assert_eq!(out.status.code(), Some(1));
+    assert_eq!(stdout(&out), "");
+    assert!(
+        stderr(&out).contains("describes only the current version"),
+        "{}",
+        stderr(&out)
+    );
+
+    // Markdown already converted by the current converter prints without
+    // needing the model.
+    let dir = h.version_dir(V2);
+    std::fs::write(dir.join("paper.md"), "# Converted\n\n$x^2$\n").unwrap();
+    let meta_path = dir.join("meta.json");
+    let mut meta: Value = serde_json::from_slice(&read(&meta_path)).unwrap();
+    meta["md_converter"] = "mineru2.5-pro-2605@bff20d4ae2bf".into();
+    std::fs::write(&meta_path, meta.to_string()).unwrap();
+    let out = h.run(&["--offline", ID, "--print", "md"], &[]).await;
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "# Converted\n\n$x^2$\n");
+
+    let out = h.run(&["--json", ID, "--print", "bib"], &[]).await;
+    assert!(!out.status.success());
+    assert!(
+        stderr(&out).contains("can't be combined with --json"),
+        "{}",
+        stderr(&out)
+    );
+}
