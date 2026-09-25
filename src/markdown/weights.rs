@@ -206,8 +206,9 @@ async fn download(
         let resp = resp
             .error_for_status()
             .with_context(|| format!("GET {url}"))?;
-        if have > 0 && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
-            // Server ignored the range; start over.
+        if resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+            // A full body: either we didn't ask for a range, or the server
+            // ignored it. Either way, start from byte 0.
             hasher = Sha256::new();
             have = 0;
         }
@@ -220,21 +221,14 @@ async fn download(
             .await?;
 
         let mut stream = resp.bytes_stream();
-        let mut next_report = have + f.size / 20;
+        let mut reporter = progress.then(|| Progress::new(f, have));
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.with_context(|| format!("reading {url}"))?;
             hasher.update(&chunk);
             out.write_all(&chunk).await?;
             have += chunk.len() as u64;
-            if progress && f.size > 100_000_000 && have >= next_report {
-                eprintln!(
-                    "  {}: {:.0}% ({:.2} / {:.2} GB)",
-                    f.name,
-                    100.0 * have as f64 / f.size as f64,
-                    gb(have),
-                    gb(f.size),
-                );
-                next_report = have + f.size / 20;
+            if let Some(line) = reporter.as_mut().and_then(|r| r.update(have)) {
+                eprintln!("{line}");
             }
         }
         out.flush().await?;
@@ -255,6 +249,45 @@ async fn download(
     tokio::fs::write(sidecar(&dest), f.sha256).await?;
     info!(file = f.name, bytes = f.size, "model file verified");
     Ok(())
+}
+
+/// Progress lines for one large download: one per 5% of the file. Files
+/// under 100 MB finish too fast to need any.
+struct Progress {
+    name: &'static str,
+    size: u64,
+    next: u64,
+}
+
+impl Progress {
+    fn new(f: &ModelFile, have: u64) -> Self {
+        let mut p = Self {
+            name: f.name,
+            size: f.size,
+            next: 0,
+        };
+        p.next = p.after(have);
+        p
+    }
+
+    fn after(&self, have: u64) -> u64 {
+        have + self.size / 20
+    }
+
+    /// The line to print after reaching `have` bytes, if any.
+    fn update(&mut self, have: u64) -> Option<String> {
+        if self.size <= 100_000_000 || have < self.next {
+            return None;
+        }
+        self.next = self.after(have);
+        Some(format!(
+            "  {}: {:.0}% ({:.2} / {:.2} GB)",
+            self.name,
+            100.0 * have as f64 / self.size as f64,
+            gb(have),
+            gb(self.size),
+        ))
+    }
 }
 
 /// Binary gigabytes, matching `eprint cache list`.
@@ -328,6 +361,11 @@ mod tests {
         assert!(is_verified(dir.path(), &CONFIG) && is_verified(dir.path(), &WEIGHTS));
         assert!(!dir.path().join("model.safetensors.part").exists());
         assert_eq!(requests(&server).await, 2);
+        let reqs = server.received_requests().await.unwrap();
+        assert!(
+            reqs.iter().all(|r| !r.headers.contains_key("range")),
+            "a fresh download doesn't ask for a range"
+        );
 
         f.all(dir.path(), &[CONFIG, WEIGHTS]).await.unwrap();
         assert_eq!(
@@ -449,6 +487,42 @@ mod tests {
         let (online, _) = fetch(&server, false);
         online.all(dir.path(), &[CONFIG]).await.unwrap();
         offline.all(dir.path(), &[CONFIG]).await.unwrap();
+    }
+
+    #[test]
+    fn progress_reports_every_five_percent_of_large_files_only() {
+        let big = ModelFile {
+            name: "model.safetensors",
+            size: 2_000_000_000,
+            sha256: "",
+        };
+        let mut p = Progress::new(&big, 0);
+        assert_eq!(p.update(99_999_999), None);
+        assert_eq!(
+            p.update(100_000_000).as_deref(),
+            Some("  model.safetensors: 5% (0.09 / 1.86 GB)")
+        );
+        assert_eq!(p.update(150_000_000), None, "next line at 10%");
+        assert!(p.update(200_000_000).unwrap().contains(": 10% "));
+
+        // Resuming at 50%: the first line comes at 55%.
+        let mut resumed = Progress::new(&big, 1_000_000_000);
+        assert_eq!(resumed.update(1_050_000_000), None);
+        assert!(resumed.update(1_100_000_000).unwrap().contains(": 55% "));
+
+        let small = ModelFile {
+            name: "tokenizer.json",
+            size: 100_000_000,
+            sha256: "",
+        };
+        assert_eq!(Progress::new(&small, 0).update(100_000_000), None);
+    }
+
+    #[test]
+    fn gb_is_binary_gigabytes() {
+        assert_eq!(gb(1 << 30), 1.0);
+        assert_eq!(gb(3 << 29), 1.5);
+        assert_eq!(gb(0), 0.0);
     }
 
     #[test]

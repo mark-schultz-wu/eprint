@@ -230,9 +230,13 @@ async fn offline_serves_the_cache_without_touching_the_network() {
     assert!(h.run(&["paper", ID], &[]).await.status.success());
 
     h.server.reset().await;
-    let out = h.run(&["--offline", "paper", ID], &[]).await;
+    // Auto-sync is enabled and due (never synced), but --offline wins.
+    let out = h
+        .run(&["--offline", "paper", ID], &[("EPRINT_AUTO_SYNC", "true")])
+        .await;
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(stdout(&out).contains(TITLE));
+    assert!(!stderr(&out).contains("auto-sync"), "{}", stderr(&out));
     assert!(h.server.received_requests().await.unwrap().is_empty());
 
     // An uncached paper can't be resolved offline: exit code 2.
@@ -429,6 +433,10 @@ async fn human_output_lists_versions_actions_and_abstract() {
         !quiet.contains("did:"),
         "nothing to do on a cache hit: {quiet}"
     );
+    assert!(
+        !quiet.contains("bytes:"),
+        "nothing downloaded on a cache hit: {quiet}"
+    );
 }
 
 /// The archive listing is unreachable: OAI-PMH supplies the current
@@ -463,6 +471,11 @@ async fn oai_fallback_resolves_a_paper_when_the_archive_is_down() {
     assert_eq!(report["resolved_version"], V2);
     assert_eq!(report["title"], "Title From OAI");
     assert_eq!(
+        report["known_versions"],
+        serde_json::json!([V2]),
+        "no duplicates"
+    );
+    assert_eq!(
         report["actions"],
         serde_json::json!(["oai-resolved", "fetched-pdf"])
     );
@@ -486,6 +499,11 @@ async fn a_missing_pdf_exits_3_and_names_the_url() {
     assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
     let expected_url = format!("{}/archive/2024/463/{V1_UNIX}.pdf", h.server.uri());
     assert!(stderr(&out).contains(&expected_url), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("Sources tried: eprint-http: "),
+        "{}",
+        stderr(&out)
+    );
 }
 
 /// Offline, an uncached version of a cached paper fails without any
@@ -616,6 +634,16 @@ async fn auto_sync_runs_only_when_stale() {
         .date()
         .to_string();
     assert_eq!(from.as_deref(), Some(day.as_str()));
+    // Under --json, auto-sync still runs but prints nothing.
+    std::fs::write(&stamp, last.to_string()).unwrap();
+    let out = h.run(&["--json", "paper", ID], &auto).await;
+    assert!(out.status.success(), "{}", stderr(&out));
+    let err = stderr(&out);
+    assert!(
+        !err.contains("auto-sync") && !err.contains("done ("),
+        "{err}"
+    );
+    assert_eq!(h.requests_to("/oai").await, 2);
     // The run advanced the stamp.
     let written: u64 = std::fs::read_to_string(&stamp)
         .unwrap()
@@ -754,4 +782,20 @@ async fn md_uses_cached_markdown_from_the_current_converter_only() {
         b"# cached",
         "untouched on failure"
     );
+}
+
+/// `cache clear --models` with no model downloaded, and a cache with no
+/// foreign directories: no errors, and no lines about either.
+#[tokio::test(flavor = "multi_thread")]
+async fn cache_clear_with_no_model_and_no_foreign_dirs() {
+    let h = Harness::new().await;
+    h.serve_paper(&[(V1, V1_UNIX, PDF_V1)]).await;
+    assert!(h.run(&["paper", ID], &[]).await.status.success());
+
+    let out = h.run(&["cache", "clear", "--models"], &[]).await;
+    assert!(out.status.success(), "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(text.starts_with("deleted 1 paper,"), "{text}");
+    assert!(!text.contains("left in place"), "{text}");
+    assert!(!text.contains("Markdown model"), "{text}");
 }

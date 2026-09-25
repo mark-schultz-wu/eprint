@@ -67,7 +67,9 @@ pub async fn list_records(
             }
             out.extend(page.records);
             match page.resumption_token {
-                Some(token) if !token.is_empty() => {
+                // The last page's token is an empty element, which the reader
+                // reports as no text: `None`.
+                Some(token) => {
                     url = format!(
                         "{endpoint}?verb=ListRecords&resumptionToken={}",
                         urlencode(&token)
@@ -223,7 +225,6 @@ pub fn parse_page(xml: &str) -> Result<PageResult> {
 
     let mut out = PageResult::default();
     let mut buf = Vec::new();
-    let mut in_header = false;
     let mut current_field: Option<HeaderField> = None;
     let mut current_id: Option<PaperId> = None;
     let mut current_datestamp: Option<String> = None;
@@ -234,15 +235,16 @@ pub fn parse_page(xml: &str) -> Result<PageResult> {
                 let local = local_name(e.name().as_ref());
                 match local.as_str() {
                     "header" => {
-                        in_header = true;
                         current_id = None;
                         current_datestamp = None;
                     }
                     // Records also carry <identifier>/<datestamp> outside the
-                    // header (dc:identifier, provenance in <about>); only the
-                    // header's describe the record.
-                    "identifier" if in_header => current_field = Some(HeaderField::Identifier),
-                    "datestamp" if in_header => current_field = Some(HeaderField::Datestamp),
+                    // header (dc:identifier, provenance in <about>). Those come
+                    // after </header>, where the record has already been
+                    // emitted, and are cleared at the next <header>, so only
+                    // the header's values ever describe a record.
+                    "identifier" => current_field = Some(HeaderField::Identifier),
+                    "datestamp" => current_field = Some(HeaderField::Datestamp),
                     "resumptionToken" => current_field = Some(HeaderField::ResumptionToken),
                     "error" => {
                         let code = attr(&e, "code");
@@ -277,7 +279,6 @@ pub fn parse_page(xml: &str) -> Result<PageResult> {
             Ok(Event::Text(t)) => {
                 let text = t.unescape().unwrap_or_default().into_owned();
                 match current_field {
-                    // Only ever set inside <header> (see the Start arm).
                     Some(HeaderField::Identifier) => {
                         if let Some(id) = parse_oai_identifier(&text) {
                             current_id = Some(id);
@@ -296,7 +297,6 @@ pub fn parse_page(xml: &str) -> Result<PageResult> {
                 let local = local_name(e.name().as_ref());
                 match local.as_str() {
                     "header" => {
-                        in_header = false;
                         if let (Some(id), Some(ds)) = (current_id.take(), current_datestamp.take())
                         {
                             out.records.push(RecordHeader { id, datestamp: ds });
@@ -488,6 +488,39 @@ mod tests {
                 datestamp: "2025-01-06T17:43:48Z".into(),
             }]
         );
+    }
+
+    /// A header missing its datestamp is skipped; it must not inherit the
+    /// previous record's trailing <datestamp> (from its provenance block).
+    #[test]
+    fn values_do_not_leak_from_one_record_into_the_next() {
+        let xml = r##"<OAI-PMH><ListRecords>
+          <record><header>
+            <identifier>oai:eprint.iacr.org:2024/463</identifier>
+            <datestamp>2025-01-06T17:43:48Z</datestamp></header>
+            <about><provenance><datestamp>1999-01-01T00:00:00Z</datestamp></provenance></about>
+          </record>
+          <record><header>
+            <identifier>oai:eprint.iacr.org:2024/464</identifier></header>
+          </record>
+        </ListRecords></OAI-PMH>"##;
+        let ids: Vec<String> = parse_page(xml)
+            .unwrap()
+            .records
+            .iter()
+            .map(|r| r.id.canonical())
+            .collect();
+        assert_eq!(ids, ["2024/463"]);
+    }
+
+    #[test]
+    fn last_page_empty_resumption_token_means_done() {
+        let xml = r##"<OAI-PMH><ListRecords>
+          <resumptionToken completeListSize="2" cursor="1"></resumptionToken>
+        </ListRecords></OAI-PMH>"##;
+        assert_eq!(parse_page(xml).unwrap().resumption_token, None);
+        let self_closing = r##"<OAI-PMH><ListRecords><resumptionToken/></ListRecords></OAI-PMH>"##;
+        assert_eq!(parse_page(self_closing).unwrap().resumption_token, None);
     }
 
     #[test]

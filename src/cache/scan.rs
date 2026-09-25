@@ -204,6 +204,20 @@ mod tests {
         assert!(root.join("2024/0007").exists());
     }
 
+    /// A symlinked directory (say, models kept on another disk) isn't
+    /// followed: its target isn't ours to size, and a link cycle would loop.
+    #[cfg(unix)]
+    #[test]
+    fn dir_size_does_not_follow_symlinks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
+        fs::write(elsewhere.path().join("big"), [0u8; 1000]).unwrap();
+        fs::write(tmp.path().join("small"), [0u8; 10]).unwrap();
+        std::os::unix::fs::symlink(elsewhere.path(), tmp.path().join("link")).unwrap();
+        std::os::unix::fs::symlink(tmp.path(), tmp.path().join("cycle")).unwrap();
+        assert_eq!(dir_size(tmp.path()), 10);
+    }
+
     #[test]
     fn dir_size_sums_nested_files() {
         let tmp = tempfile::tempdir().unwrap();

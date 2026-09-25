@@ -1,0 +1,24 @@
+# cargo-mutants configuration (https://mutants.rs).
+#
+# Every mutant should be caught by the tests, except the ones excluded here,
+# each for a stated reason. A new miss in `cargo mutants` output is a real
+# test gap.
+
+exclude_re = [
+    # Needs the 2.2 GB model: exercised by real conversions, not by tests.
+    "Job::run",
+    "Job::load_model",
+    # Picks the build's GPU backend; the result depends on the machine.
+    "default_device",
+    # The interactive version picker (dialoguer) needs a terminal.
+    "label_for",
+    "replace - with .* in target_version",
+    # Log-only page counter.
+    "replace \\+= with .* in list_records",
+    # The real Hugging Face client's timeouts; tests use a plain client.
+    "download_client",
+    # `--json` silencing progress output of the conversion and download.
+    # (Anchored: other functions share these name prefixes.)
+    "delete ! in convert$",
+    "delete ! in ensure$",
+]
