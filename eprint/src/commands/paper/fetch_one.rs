@@ -72,9 +72,9 @@ pub async fn ensure_version(
     // The landing page always describes the *current* version, so for historical
     // fetches we keep the title (shared across versions) but not bib/abstract.
     //
-    // NOTE: eprint.iacr.org landing pages are currently Cloudflare-blocked (403),
-    // so this is best-effort: both fetch and parse failures demote to a warning
-    // rather than failing the command — the PDF is already cached.
+    // Best-effort: fetch and parse failures demote to a warning rather than
+    // failing the command — the PDF is already cached, and title/abstract can
+    // also come from OAI.
     let have_title = paper_meta
         .as_deref()
         .and_then(|p| p.title.as_deref())

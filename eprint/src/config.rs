@@ -8,7 +8,7 @@
 //! | Var                          | Meaning                                                           |
 //! |------------------------------|-------------------------------------------------------------------|
 //! | `EPRINT_CACHE_DIR`           | cache root (default: `$XDG_CACHE_HOME/eprint`)                    |
-//! | `EPRINT_DOWNLOADS_DIR`       | dir scanned for browser-delivered PDFs (default: `~/Downloads`)   |
+//! | `EPRINT_DOWNLOADS_DIR`       | local `<year>-<num>.pdf` files dir (default: `~/Downloads`)       |
 //! | `EPRINT_CONTACT`             | contact appended to outbound `User-Agent`                         |
 //! | `EPRINT_MIN_INTERVAL_S`      | minimum seconds between outbound HTTP requests (default `2.0`)    |
 //! | `EPRINT_ML_BACKEND`          | `local` (default) or `remote`                                     |

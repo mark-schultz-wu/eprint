@@ -1,10 +1,8 @@
 //! Pluggable PDF byte sources.
 //!
-//! A paper's PDF can come from several places. eprint.iacr.org's PDF endpoint
-//! is currently behind a Cloudflare challenge (HTTP 403), so today PDFs arrive
-//! out-of-band: a human downloads them in a browser and a companion watcher
-//! drops them into the downloads dir under the canonical `<year>-<num>.pdf`
-//! name. A **requester-pays S3 bucket** is planned as another source.
+//! A paper's PDF can come from several places: a local downloads dir holding
+//! `<year>-<num>.pdf` files, or eprint.iacr.org directly over HTTP. A
+//! **requester-pays S3 bucket** is planned as another source.
 //!
 //! Rather than special-casing each, acquisition goes through an ordered list of
 //! [`PdfSource`]s. [`acquire`] tries each in turn and takes the first that
@@ -104,13 +102,9 @@ impl PdfSource for DownloadsSource {
     }
 }
 
-/// Direct fetch from eprint.iacr.org.
-///
-/// NOTE: the PDF endpoints are currently behind a Cloudflare managed challenge
-/// and return HTTP 403 from every IP, so this source effectively always errors
-/// today. It is retained (not stripped) as the lowest-priority fallback for
-/// if/when direct access returns, and because the OAI/RSS endpoints on the same
-/// host are still reachable.
+/// Direct fetch from eprint.iacr.org: `/<year>/<num>.pdf` for the current
+/// version, `/archive/<year>/<num>/<unix-seconds>.pdf` for historical ones.
+/// The host rate-limits per IP; `net::get_bytes` backs off and retries on 429.
 pub struct EprintHttpSource {
     client: reqwest::Client,
     rl: Arc<net::RateLimiter>,
@@ -190,10 +184,10 @@ pub async fn acquire(cx: &Context, req: &PdfRequest<'_>) -> Result<Acquired> {
     Err(crate::exit::CommandFailure::PdfUnavailable(unavailable_message(cx, req, &tried)).into())
 }
 
-/// Build the actionable error for when no source produced the PDF. eprint's PDF
-/// endpoint is Cloudflare-blocked (403) to non-browsers, so the fix is almost
-/// always "download it in a browser and drop it here" — so we spell out the
-/// exact URL and the exact path to save it as, rather than a vague hint.
+/// Build the actionable error for when no source produced the PDF. The
+/// per-source reasons (e.g. the HTTP error) are already in `tried`; this adds
+/// what to do next, including the exact path a manually downloaded PDF should
+/// be saved to.
 fn unavailable_message(cx: &Context, req: &PdfRequest<'_>, tried: &[String]) -> String {
     use std::fmt::Write as _;
     let mut m = format!(
@@ -202,38 +196,32 @@ fn unavailable_message(cx: &Context, req: &PdfRequest<'_>, tried: &[String]) -> 
         req.version,
         tried.join("; "),
     );
+    let save_as = crate::downloads::expected_pdf_path(&cx.cfg.downloads_dir, req.id);
     if cx.offline {
         let _ = write!(
             m,
-            "Running with --offline, so network sources were skipped. To file this paper, \
-             download it in a browser and save it as:\n    {}\nthen re-run without --offline \
-             (or keep --offline once the file is in place).",
-            crate::downloads::expected_pdf_path(&cx.cfg.downloads_dir, req.id).display(),
+            "Running with --offline, so network sources were skipped. Re-run without \
+             --offline to fetch it from eprint.iacr.org, or save the PDF as:\n    {}",
+            save_as.display(),
         );
     } else if req.is_current {
         let _ = write!(
             m,
-            "eprint.iacr.org serves PDFs behind a Cloudflare challenge (HTTP 403), so they \
-             can't be fetched programmatically. To file this paper:\n  \
-             1. Open this URL in a browser and download the PDF:\n       {}\n  \
-             2. Save it as:\n       {}\n     \
-             (the companion watcher does this automatically when it's running).\n  \
-             3. Re-run this command.",
+            "Fetching {} failed (reason above). If eprint.iacr.org was rate-limiting, wait a \
+             minute and re-run. Alternatively, download the PDF yourself and save it as:\n    {}",
             req.id.pdf_url(),
-            crate::downloads::expected_pdf_path(&cx.cfg.downloads_dir, req.id).display(),
+            save_as.display(),
         );
     } else {
-        // Historical version: the downloads source only serves the *current*
-        // PDF (it returns nothing for an older version), and eprint's /archive
-        // PDF endpoint is 403 too — so there is no working source today. Don't
-        // suggest dropping a file in the downloads dir; it wouldn't be used.
+        // The downloads source only serves the *current* PDF, so suggesting a
+        // file drop for a historical version would be a dead end.
         let _ = write!(
             m,
-            "This is a historical version ({}). There's no working source for older versions \
-             yet: the downloads dir + watcher only ever deliver the *current* PDF, and \
-             eprint's /archive PDF endpoint is Cloudflare-blocked. Operate on the current \
-             version instead by dropping `--version`.",
+            "Fetching historical version {} from {} failed (reason above). If eprint.iacr.org \
+             was rate-limiting, wait a minute and re-run. (Saving a PDF into the downloads dir \
+             won't help here: that source only serves the current version.)",
             req.version,
+            req.id.historical_pdf_url(req.version),
         );
     }
     m

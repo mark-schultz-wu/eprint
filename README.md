@@ -28,10 +28,13 @@ The base tool is self-contained — no runtime dependencies:
   - *remote* (`EPRINT_ML_BACKEND=remote`): set `EPRINT_ML_ENDPOINT`; no local
     Python/uv needed.
 
-PDFs themselves are **not** fetched over HTTP — `eprint.iacr.org` is behind a
-Cloudflare challenge (403). They arrive via the downloads dir
-(`EPRINT_DOWNLOADS_DIR`, default `~/Downloads`), delivered by the companion
-MacBook watcher; an S3 source is planned. See `eprint/src/source.rs`.
+PDFs are fetched from `eprint.iacr.org` over HTTP, current and historical
+versions alike. The host rate-limits per IP (HTTP 429 after ~20 rapid
+requests); the CLI paces itself (`EPRINT_MIN_INTERVAL_S`, default 2 s) and
+backs off and retries on 429. A PDF already saved in the downloads dir
+(`EPRINT_DOWNLOADS_DIR`, default `~/Downloads`) as `<year>-<num>.pdf` is used
+for the current version without fetching; an S3 source is planned. See
+`eprint/src/source.rs`.
 
 ## CLI
 

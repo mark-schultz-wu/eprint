@@ -115,11 +115,10 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
         }
     }
 
-    // 1b. If we still don't know the current version (archive scrape blocked,
-    //     or a brand-new paper), fall back to OAI-PMH GetRecord — the reliably
-    //     reachable endpoint — for the current version plus title/abstract.
-    //     Without this, a PDF already delivered to the downloads dir can't be
-    //     filed, since there's no version to file it under.
+    // 1b. If we still don't know the current version (archive scrape failed,
+    //     or a brand-new paper), fall back to OAI-PMH GetRecord for the current
+    //     version plus title/abstract. Without a version there's nothing to
+    //     file the PDF under.
     let mut oai_abstract: Option<String> = None;
     let have_current = paper_meta
         .as_ref()
@@ -159,21 +158,33 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
 
     // 3. Ensure that version's PDF is on disk.
     let Some(v) = target_version else {
-        // No version to operate on: archive scrape was blocked (Cloudflare 403)
-        // AND the OAI fallback didn't yield a current version. The PDF source
+        // No version to operate on: the archive scrape failed AND the OAI
+        // fallback didn't yield a current version. The PDF source
         // list is never consulted, so any local PDF in the downloads dir goes
         // unused — not because it's missing, but because there's no version to
         // file it under. This used to fall through to an (almost empty) report
         // and exit 0, masking the failure; make it a hard, coded error instead.
         let downloads_pdf = crate::downloads::expected_pdf_path(&cx.cfg.downloads_dir, id);
         warn!(id = %id, offline = cx.offline, downloads_pdf = %downloads_pdf.display(), "no version resolved");
+        let why = if cx.offline {
+            "nothing is cached for it and --offline skips the archive listing and OAI-PMH; \
+             re-run without --offline"
+                .to_owned()
+        } else {
+            // Online, an existing paper nearly always resolves via one of the
+            // two, so the usual cause is a wrong id (the archive page is a 200
+            // with no versions and OAI says idDoesNotExist).
+            format!(
+                "neither the archive listing nor OAI-PMH yielded a version (see warnings above). \
+                 \"OAI-PMH has no record\" usually means the id is wrong; check {}. Otherwise \
+                 it's a network or rate-limit failure, so retry in a minute",
+                id.html_url(),
+            )
+        };
         return Err(crate::exit::CommandFailure::NoVersionResolved(format!(
-            "could not resolve a version for {id}: the archive listing is blocked and the OAI \
-             fallback returned nothing, so there's no version to file the PDF under. A local \
-             downloaded PDF (if any) at {} can't be used without a version. Re-run online so \
-             OAI-PMH can resolve the current version{}.",
+            "could not resolve a version for {id}: {why}. (A PDF at {} can't be filed without a \
+             version.)",
             downloads_pdf.display(),
-            if cx.offline { " (you are --offline)" } else { "" },
         ))
         .into());
     };
@@ -184,7 +195,7 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     let version = v;
     fetch_one::ensure_version(cx, id, &version, paper_meta.as_mut(), &mut report).await?;
 
-    // 3b. Persist the OAI abstract if the (often-blocked) landing scrape didn't
+    // 3b. Persist the OAI abstract if the best-effort landing scrape didn't
     //     already write one for this version.
     if let Some(abs) = &oai_abstract {
         let ap = cache::version_paths(root, id, &version).abstract_;

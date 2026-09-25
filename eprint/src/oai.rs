@@ -110,10 +110,9 @@ fn urlencode(s: &str) -> String {
 
 /// One paper's current metadata from an OAI-PMH `GetRecord` (oai_dc).
 ///
-/// Used as the reliable fallback for version discovery + title/abstract: the
-/// archive/landing pages sit behind Cloudflare and are often 403, but the OAI
-/// endpoint stays reachable, so this is what lets a downloads-dir PDF be filed
-/// when scraping is blocked.
+/// Fallback for version discovery + title/abstract when the archive listing
+/// can't be scraped (network error, rate limit, template drift), so a paper
+/// still gets a current version to file its PDF under.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
     /// `YYYY-MM-DDThh:mm:ssZ` last-modified stamp = the current version.

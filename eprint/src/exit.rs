@@ -14,7 +14,7 @@
 /// A failure with a stable, scriptable exit code.
 #[derive(thiserror::Error, Debug)]
 pub enum CommandFailure {
-    /// No version could be resolved: the archive listing was blocked and the
+    /// No version could be resolved: the archive listing failed and the
     /// OAI fallback was empty, so there is nothing to file the PDF under. A
     /// local downloaded PDF, if present, goes unused — not missing, just
     /// un-fileable.
@@ -22,7 +22,7 @@ pub enum CommandFailure {
     NoVersionResolved(String),
 
     /// No source produced the PDF bytes (downloads dir empty for this id,
-    /// network blocked, etc.).
+    /// HTTP fetch failed or rate-limited past the retry budget, etc.).
     #[error("{0}")]
     PdfUnavailable(String),
 

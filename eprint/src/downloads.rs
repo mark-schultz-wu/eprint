@@ -1,12 +1,10 @@
-//! Locate browser-delivered PDFs in the downloads dir.
+//! Locate locally delivered PDFs in the downloads dir.
 //!
-//! `eprint.iacr.org` is behind a Cloudflare managed challenge that blocks
-//! programmatic PDF downloads, so the bytes can no longer be fetched over
-//! HTTP. Instead, a human downloads the paper in a real browser and a
-//! companion watcher delivers it here, named canonically as
-//! `<year>-<num>.pdf` (e.g. `2024-1234.pdf`). Metadata (title, BibTeX,
-//! abstract, version listing) is still fetched over the network as usual;
-//! only the PDF bytes come from this directory.
+//! A PDF saved here under the canonical name `<year>-<num>.pdf` (e.g.
+//! `2024-1234.pdf`) — by hand or by the companion watcher — is used as the
+//! current version's bytes instead of fetching them over HTTP. Metadata
+//! (title, BibTeX, abstract, version listing) is still fetched over the
+//! network as usual.
 
 use crate::id::PaperId;
 use std::path::{Path, PathBuf};
