@@ -129,12 +129,21 @@ async fn sync_impl(
 }
 
 fn cache_has_any_paper(root: &Path) -> bool {
-    let Ok(rd) = std::fs::read_dir(root) else { return false };
+    let Ok(rd) = std::fs::read_dir(root) else {
+        return false;
+    };
     for year in rd.flatten() {
-        if !year.file_name().to_string_lossy().chars().all(|c| c.is_ascii_digit()) {
+        if !year
+            .file_name()
+            .to_string_lossy()
+            .chars()
+            .all(|c| c.is_ascii_digit())
+        {
             continue;
         }
-        let Ok(num_rd) = std::fs::read_dir(year.path()) else { continue };
+        let Ok(num_rd) = std::fs::read_dir(year.path()) else {
+            continue;
+        };
         for paper in num_rd.flatten() {
             if paper.path().join(cache::files::PAPER_META).exists() {
                 return true;
@@ -145,7 +154,9 @@ fn cache_has_any_paper(root: &Path) -> bool {
 }
 
 async fn read_last_sync(root: &Path) -> Option<i64> {
-    let s = tokio::fs::read_to_string(root.join(LAST_SYNC_STAMP)).await.ok()?;
+    let s = tokio::fs::read_to_string(root.join(LAST_SYNC_STAMP))
+        .await
+        .ok()?;
     s.trim().parse().ok()
 }
 
@@ -172,8 +183,8 @@ fn now_unix() -> i64 {
 }
 
 fn iso_date_from_unix(unix_s: i64) -> String {
-    let dt = OffsetDateTime::from_unix_timestamp(unix_s.max(0))
-        .unwrap_or(OffsetDateTime::UNIX_EPOCH);
+    let dt =
+        OffsetDateTime::from_unix_timestamp(unix_s.max(0)).unwrap_or(OffsetDateTime::UNIX_EPOCH);
     dt.format(format_description!("[year]-[month]-[day]"))
         .expect("YYYY-MM-DD format is infallible")
 }

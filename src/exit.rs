@@ -45,7 +45,8 @@ impl CommandFailure {
     /// Pull the exit code out of an arbitrary error chain, defaulting to 1 for
     /// anything that isn't a typed [`CommandFailure`].
     pub fn code_of(err: &anyhow::Error) -> i32 {
-        err.downcast_ref::<CommandFailure>().map_or(1, CommandFailure::code)
+        err.downcast_ref::<CommandFailure>()
+            .map_or(1, CommandFailure::code)
     }
 }
 

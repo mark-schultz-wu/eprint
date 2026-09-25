@@ -19,13 +19,20 @@ impl PaperId {
     }
 
     pub fn archive_url(&self) -> String {
-        format!("https://eprint.iacr.org/archive/versions/{}", self.canonical())
+        format!(
+            "https://eprint.iacr.org/archive/versions/{}",
+            self.canonical()
+        )
     }
 
     /// URL for a specific historical version's PDF, using eprint's
     /// `/archive/<year>/<num>/<unix-seconds>.pdf` form.
     pub fn historical_pdf_url(&self, version: &crate::ids::version::Canonical) -> String {
-        format!("https://eprint.iacr.org/archive/{}/{}.pdf", self.canonical(), version.to_unix())
+        format!(
+            "https://eprint.iacr.org/archive/{}/{}.pdf",
+            self.canonical(),
+            version.to_unix()
+        )
     }
 
     /// eprint's canonical id, e.g. `2016/086` or `2024/1234`.
@@ -101,8 +108,13 @@ mod tests {
 
     #[test]
     fn parses_alternative_forms() {
-        for s in &["2024-463", "2024_463", "https://eprint.iacr.org/2024/463",
-                   "https://eprint.iacr.org/2024/463.pdf", "eprint-2024-463"] {
+        for s in &[
+            "2024-463",
+            "2024_463",
+            "https://eprint.iacr.org/2024/463",
+            "https://eprint.iacr.org/2024/463.pdf",
+            "eprint-2024-463",
+        ] {
             let id: PaperId = s.parse().unwrap_or_else(|_| panic!("failed: {s}"));
             assert_eq!(id.year, 2024);
             assert_eq!(id.num, 463);
@@ -111,14 +123,30 @@ mod tests {
 
     #[test]
     fn urls_pad_number_to_min_three_digits() {
-        let id = PaperId { year: 2020, num: 18 };
+        let id = PaperId {
+            year: 2020,
+            num: 18,
+        };
         assert_eq!(id.canonical(), "2020/018");
         assert_eq!(id.pdf_url(), "https://eprint.iacr.org/2020/018.pdf");
         assert_eq!(id.html_url(), "https://eprint.iacr.org/2020/018");
-        assert_eq!(id.archive_url(), "https://eprint.iacr.org/archive/versions/2020/018");
+        assert_eq!(
+            id.archive_url(),
+            "https://eprint.iacr.org/archive/versions/2020/018"
+        );
         let v: crate::ids::version::Canonical = "20200110T000000Z".parse().unwrap();
-        assert_eq!(id.historical_pdf_url(&v), "https://eprint.iacr.org/archive/2020/018/1578614400.pdf");
-        assert_eq!(PaperId { year: 2024, num: 1234 }.pdf_url(), "https://eprint.iacr.org/2024/1234.pdf");
+        assert_eq!(
+            id.historical_pdf_url(&v),
+            "https://eprint.iacr.org/archive/2020/018/1578614400.pdf"
+        );
+        assert_eq!(
+            PaperId {
+                year: 2024,
+                num: 1234
+            }
+            .pdf_url(),
+            "https://eprint.iacr.org/2024/1234.pdf"
+        );
     }
 
     #[test]
@@ -130,10 +158,34 @@ mod tests {
     fn oai_identifier_pads_number_to_min_three_digits() {
         // eprint's OAI endpoint only recognizes the 3-min-width form; the bare
         // number (`2016/86`) yields idDoesNotExist. Numbers >= 100 are unchanged.
-        assert_eq!(PaperId { year: 2009, num: 1 }.oai_identifier(), "oai:eprint.iacr.org:2009/001");
-        assert_eq!(PaperId { year: 2016, num: 86 }.oai_identifier(), "oai:eprint.iacr.org:2016/086");
-        assert_eq!(PaperId { year: 2023, num: 525 }.oai_identifier(), "oai:eprint.iacr.org:2023/525");
-        assert_eq!(PaperId { year: 2024, num: 1234 }.oai_identifier(), "oai:eprint.iacr.org:2024/1234");
+        assert_eq!(
+            PaperId { year: 2009, num: 1 }.oai_identifier(),
+            "oai:eprint.iacr.org:2009/001"
+        );
+        assert_eq!(
+            PaperId {
+                year: 2016,
+                num: 86
+            }
+            .oai_identifier(),
+            "oai:eprint.iacr.org:2016/086"
+        );
+        assert_eq!(
+            PaperId {
+                year: 2023,
+                num: 525
+            }
+            .oai_identifier(),
+            "oai:eprint.iacr.org:2023/525"
+        );
+        assert_eq!(
+            PaperId {
+                year: 2024,
+                num: 1234
+            }
+            .oai_identifier(),
+            "oai:eprint.iacr.org:2024/1234"
+        );
     }
 
     #[test]

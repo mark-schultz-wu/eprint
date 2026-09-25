@@ -5,8 +5,8 @@
 
 use crate::cache::{self, PaperMeta};
 use crate::cli::{Context, PaperArgs};
-use crate::ids::PaperId;
 use crate::ids::version::Canonical;
+use crate::ids::PaperId;
 use anyhow::{Context as _, Result};
 
 pub async fn target_version(
@@ -16,9 +16,9 @@ pub async fn target_version(
     args: &PaperArgs,
 ) -> Result<Option<Canonical>> {
     if let Some(v) = &args.version {
-        let parsed: Canonical = v
-            .parse()
-            .with_context(|| format!("--version {v:?} is not canonical timestamp YYYYMMDDTHHMMSSZ"))?;
+        let parsed: Canonical = v.parse().with_context(|| {
+            format!("--version {v:?} is not canonical timestamp YYYYMMDDTHHMMSSZ")
+        })?;
         return Ok(Some(parsed));
     }
     if args.select_version {
@@ -33,7 +33,10 @@ pub async fn target_version(
             !versions.is_empty(),
             "no known versions to choose from (run without --offline to scrape the archive)"
         );
-        let labels: Vec<String> = versions.iter().map(|v| label_for(cx, id, paper_meta, v)).collect();
+        let labels: Vec<String> = versions
+            .iter()
+            .map(|v| label_for(cx, id, paper_meta, v))
+            .collect();
         let idx = dialoguer::Select::new()
             .with_prompt("Pick a version")
             .items(&labels)
@@ -51,8 +54,12 @@ fn label_for(cx: &Context, id: PaperId, paper_meta: Option<&PaperMeta>, v: &Cano
         .unwrap_or(false);
     let is_cached = cache::version_dir(&cx.cfg.cache_root, id, v).exists();
     let mut tags = Vec::new();
-    if is_current { tags.push("current"); }
-    if is_cached { tags.push("cached"); }
+    if is_current {
+        tags.push("current");
+    }
+    if is_cached {
+        tags.push("cached");
+    }
     if tags.is_empty() {
         v.to_string()
     } else {

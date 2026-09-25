@@ -38,4 +38,3 @@ impl PdfSource for EprintHttpSource {
         Ok(Some(bytes.to_vec()))
     }
 }
-

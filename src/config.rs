@@ -62,7 +62,9 @@ fn cache_root_from_env() -> PathBuf {
     if let Some(v) = env_string("EPRINT_CACHE_DIR") {
         return PathBuf::from(v);
     }
-    dirs::cache_dir().unwrap_or_else(|| PathBuf::from(".")).join("eprint")
+    dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("eprint")
 }
 
 fn env_string(key: &str) -> Option<String> {

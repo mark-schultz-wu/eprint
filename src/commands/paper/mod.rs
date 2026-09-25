@@ -17,10 +17,10 @@ mod resolve;
 
 use crate::cache;
 use crate::cli::{Context, PaperArgs};
-use crate::ids::PaperId;
 use crate::iacr::http;
 use crate::iacr::oai;
 use crate::ids::version;
+use crate::ids::PaperId;
 use anyhow::{Context as _, Result};
 use serde::Serialize;
 use tracing::warn;
@@ -62,7 +62,11 @@ pub struct ReportBuilder {
 
 impl ReportBuilder {
     pub fn new(id: String) -> Self {
-        Self { id, bytes_downloaded: 0, actions: Vec::new() }
+        Self {
+            id,
+            bytes_downloaded: 0,
+            actions: Vec::new(),
+        }
     }
 
     /// Record a step that was performed (shown in the report's `did:` line).
@@ -80,7 +84,11 @@ impl ReportBuilder {
     /// report's `resolved_version`/`directory` are non-`Option`. The remaining
     /// metadata fields (title, versions, md_converter) default to empty and are
     /// set by the caller afterwards.
-    pub fn resolve(self, version: crate::ids::version::Canonical, directory: String) -> PaperReport {
+    pub fn resolve(
+        self,
+        version: crate::ids::version::Canonical,
+        directory: String,
+    ) -> PaperReport {
         PaperReport {
             id: self.id,
             title: None,
@@ -105,14 +113,20 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     // 1. Refresh the archive listing if needed.
     let root = &cx.cfg.cache_root;
     let mut paper_meta = cache::read_paper_meta(root, id).await;
-    let need_archive = args.force || paper_meta.as_ref().map(|p| p.known_versions.is_empty()).unwrap_or(true);
+    let need_archive = args.force
+        || paper_meta
+            .as_ref()
+            .map(|p| p.known_versions.is_empty())
+            .unwrap_or(true);
     if need_archive && !cx.offline {
         match known_versions::refresh(cx, id, paper_meta.clone()).await {
             Ok(new_meta) => {
                 paper_meta = Some(new_meta);
                 report.action("archive-listed");
             }
-            Err(e) => warn!(error = %e, "could not scrape archive listing; falling back to whatever's on file"),
+            Err(e) => {
+                warn!(error = %e, "could not scrape archive listing; falling back to whatever's on file")
+            }
         }
     }
 
@@ -218,7 +232,9 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
         report.known_versions = pm.known_versions.clone();
     }
     report.cached_versions = cache::existing_versions(root, id);
-    report.md_converter = cache::read_version_meta(root, id, &version).await.md_converter;
+    report.md_converter = cache::read_version_meta(root, id, &version)
+        .await
+        .md_converter;
 
     emit::print(cx, &args, &report).await?;
     Ok(())

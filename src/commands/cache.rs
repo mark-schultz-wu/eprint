@@ -104,7 +104,11 @@ async fn list(cx: &Context) -> Result<()> {
     }
     if !cx.json {
         if models_bytes > 0 {
-            println!("Markdown model: {} in {}", fmt_bytes(models_bytes), models_root(root).display());
+            println!(
+                "Markdown model: {} in {}",
+                fmt_bytes(models_bytes),
+                models_root(root).display()
+            );
         } else {
             println!("Markdown model: not downloaded (2.2 GB, fetched on first --md)");
         }
@@ -132,10 +136,17 @@ async fn clear(cx: &Context, dry_run: bool, models: bool) -> Result<()> {
     let mut foreign = 0u64;
     if let Ok(rd) = std::fs::read_dir(root) {
         for year in rd.flatten() {
-            if !year.file_name().to_string_lossy().chars().all(|c| c.is_ascii_digit()) {
+            if !year
+                .file_name()
+                .to_string_lossy()
+                .chars()
+                .all(|c| c.is_ascii_digit())
+            {
                 continue;
             }
-            let Ok(num_rd) = std::fs::read_dir(year.path()) else { continue };
+            let Ok(num_rd) = std::fs::read_dir(year.path()) else {
+                continue;
+            };
             for paper in num_rd.flatten() {
                 let paper_path = paper.path();
                 if !paper_path.is_dir() {
@@ -182,10 +193,7 @@ async fn clear(cx: &Context, dry_run: bool, models: bool) -> Result<()> {
         root.display()
     );
     if foreign > 0 {
-        println!(
-            "  ({} unrecognized directories left in place)",
-            foreign
-        );
+        println!("  ({} unrecognized directories left in place)", foreign);
     }
     let model_bytes = dir_size(&models_root(root));
     if models && model_bytes > 0 {
@@ -199,7 +207,9 @@ async fn clear(cx: &Context, dry_run: bool, models: bool) -> Result<()> {
 /// keeps by default because they're expensive to re-download.
 fn report_models(bytes: u64, models: bool, dry_run: bool) {
     match (models, dry_run) {
-        (true, true) if bytes > 0 => println!("would delete the Markdown model, {}", fmt_bytes(bytes)),
+        (true, true) if bytes > 0 => {
+            println!("would delete the Markdown model, {}", fmt_bytes(bytes))
+        }
         (true, false) if bytes > 0 => println!("deleted the Markdown model, {}", fmt_bytes(bytes)),
         (false, dry) if bytes > 0 => println!(
             "{} the Markdown model ({}); add --models to delete it too",
@@ -212,8 +222,12 @@ fn report_models(bytes: u64, models: bool, dry_run: bool) {
 
 /// True iff `meta_path` exists and its JSON has `"tool": "eprint"`.
 fn is_eprint_paper(meta_path: &Path) -> bool {
-    let Ok(s) = std::fs::read_to_string(meta_path) else { return false };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) else { return false };
+    let Ok(s) = std::fs::read_to_string(meta_path) else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) else {
+        return false;
+    };
     v.get("tool").and_then(|t| t.as_str()) == Some(cache::TOOL_TAG)
 }
 

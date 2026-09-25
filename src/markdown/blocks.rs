@@ -53,8 +53,8 @@ fn inline_math(s: &str) -> String {
     static BOXED: OnceLock<Regex> = OnceLock::new();
     static INLINE: OnceLock<Regex> = OnceLock::new();
     static DISPLAY: OnceLock<Regex> = OnceLock::new();
-    let boxed = BOXED
-        .get_or_init(|| Regex::new(r"\\\(\s*\\boxed\{([\w\s,.+\-]+)\}\s*\\\)").unwrap());
+    let boxed =
+        BOXED.get_or_init(|| Regex::new(r"\\\(\s*\\boxed\{([\w\s,.+\-]+)\}\s*\\\)").unwrap());
     let inline = INLINE.get_or_init(|| Regex::new(r"(?s)\\\(\s*(.*?)\s*\\\)").unwrap());
     let display = DISPLAY.get_or_init(|| Regex::new(r"(?s)\\\[\s*(.*?)\s*\\\]").unwrap());
     let s = boxed.replace_all(s, "[$1]");
@@ -100,7 +100,10 @@ mod tests {
 
     #[test]
     fn boxed_citations_become_brackets() {
-        assert_eq!(inline_math(r"Subbarao \( \boxed{5} \) have"), "Subbarao [5] have");
+        assert_eq!(
+            inline_math(r"Subbarao \( \boxed{5} \) have"),
+            "Subbarao [5] have"
+        );
         assert_eq!(inline_math(r"see \( \boxed{9,8} \)"), "see [9,8]");
         // A real boxed formula is left alone.
         assert_eq!(inline_math(r"\( \boxed{x^2} \)"), r"$\boxed{x^2}$");

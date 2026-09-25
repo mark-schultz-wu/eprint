@@ -2,8 +2,8 @@
 //! Read-only browse; doesn't touch the cache.
 
 use crate::cli::{Context, FeedArgs, FeedView};
-use crate::iacr::rss::{self, Item};
 use crate::iacr::http;
+use crate::iacr::rss::{self, Item};
 use anyhow::Result;
 
 pub async fn run(cx: &Context, args: FeedArgs) -> Result<()> {

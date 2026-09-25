@@ -113,7 +113,9 @@ fn bibtex_re() -> &'static regex::Regex {
 fn clean_inline(s: &str) -> String {
     let no_tags = strip_tags_re().replace_all(s, " ");
     let decoded = decode_entities(&no_tags);
-    whitespace_re().replace_all(decoded.trim(), " ").into_owned()
+    whitespace_re()
+        .replace_all(decoded.trim(), " ")
+        .into_owned()
 }
 
 fn strip_tags_re() -> &'static regex::Regex {
@@ -167,7 +169,10 @@ mod tests {
     #[test]
     fn extracts_abstract() {
         let l = parse(SAMPLE).unwrap();
-        assert!(l.abstract_.unwrap().starts_with("Fully Homomorphic Encryption"));
+        assert!(l
+            .abstract_
+            .unwrap()
+            .starts_with("Fully Homomorphic Encryption"));
     }
 
     #[test]

@@ -27,8 +27,12 @@ pub async fn print(cx: &Context, args: &PaperArgs, report: &PaperReport) -> Resu
         println!("  versions: {total} known, {cached} cached");
         for v in report.known_versions.iter().rev() {
             let mut tags = Vec::new();
-            if Some(v) == report.current_version.as_ref() { tags.push("current"); }
-            if report.cached_versions.contains(v) { tags.push("cached"); }
+            if Some(v) == report.current_version.as_ref() {
+                tags.push("current");
+            }
+            if report.cached_versions.contains(v) {
+                tags.push("cached");
+            }
             let tag_str = if tags.is_empty() {
                 String::new()
             } else {

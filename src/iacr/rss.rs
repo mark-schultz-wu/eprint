@@ -145,7 +145,10 @@ mod tests {
         assert_eq!(items[0].title, "Some Paper Title");
         assert_eq!(items[0].link, "https://eprint.iacr.org/2026/100");
         assert_eq!(items[0].authors, vec!["Alice", "Bob"]);
-        assert_eq!(items[0].category.as_deref(), Some("Cryptographic protocols"));
+        assert_eq!(
+            items[0].category.as_deref(),
+            Some("Cryptographic protocols")
+        );
         assert_eq!(items[1].authors, vec!["Carol"]);
     }
 }

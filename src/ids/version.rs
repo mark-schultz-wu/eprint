@@ -84,7 +84,12 @@ impl fmt::Display for Canonical {
         // `format` only fails on incompatible format descriptors or
         // out-of-range components; our descriptor matches the wrapper's
         // invariant, so the call cannot fail at runtime.
-        f.write_str(&self.0.format(CANONICAL_FMT).expect("format infallible for canonical"))
+        f.write_str(
+            &self
+                .0
+                .format(CANONICAL_FMT)
+                .expect("format infallible for canonical"),
+        )
     }
 }
 
@@ -150,7 +155,12 @@ impl FromStr for ArchiveCompact {
 
 impl fmt::Display for ArchiveCompact {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0.format(COMPACT_FMT).expect("format infallible for compact"))
+        f.write_str(
+            &self
+                .0
+                .format(COMPACT_FMT)
+                .expect("format infallible for compact"),
+        )
     }
 }
 

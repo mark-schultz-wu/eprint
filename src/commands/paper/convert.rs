@@ -7,9 +7,9 @@
 use crate::cache;
 use crate::cli::Context;
 use crate::commands::paper::ReportBuilder;
+use crate::ids::version::Canonical;
 use crate::ids::PaperId;
 use crate::markdown;
-use crate::ids::version::Canonical;
 use anyhow::Result;
 use tracing::info;
 
@@ -26,7 +26,10 @@ pub async fn maybe_run(
         info!(id = %id, version = %version, "markdown already cached");
         return Ok(());
     }
-    let pages_dir = paths.dir.join("md-pages").join(markdown::CONVERTER_ID.replace('@', "-"));
+    let pages_dir = paths
+        .dir
+        .join("md-pages")
+        .join(markdown::CONVERTER_ID.replace('@', "-"));
     let md = markdown::convert(cx, &paths.pdf, &pages_dir).await?;
     tokio::fs::write(&paths.md, &md).await?;
     let mut vmeta = cache::read_version_meta(root, id, version).await;

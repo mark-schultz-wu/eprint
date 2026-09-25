@@ -26,7 +26,12 @@ async fn main() -> Result<()> {
         cfg.sync.stale_after_hours = h;
     }
     let rate_limiter = iacr::http::rate_limiter(cfg.network.min_interval_s, 3);
-    let cx = cli::Context { cfg, offline: args.offline, json: args.json, rate_limiter };
+    let cx = cli::Context {
+        cfg,
+        offline: args.offline,
+        json: args.json,
+        rate_limiter,
+    };
     let result = match args.command {
         cli::Command::Paper(c) => commands::paper::run(&cx, c).await,
         cli::Command::Sync(c) => commands::sync::run(&cx, c).await,
@@ -50,7 +55,9 @@ fn init_tracing(verbose: u8, format: cli::LogFormat) {
     let registry = tracing_subscriber::registry().with(filter);
     match format {
         cli::LogFormat::Pretty => registry.with(tracing_subscriber::fmt::layer()).init(),
-        cli::LogFormat::Json => registry.with(tracing_subscriber::fmt::layer().json()).init(),
+        cli::LogFormat::Json => registry
+            .with(tracing_subscriber::fmt::layer().json())
+            .init(),
     }
 }
 

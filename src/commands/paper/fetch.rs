@@ -7,12 +7,12 @@
 
 use crate::cache::{self, PaperMeta, VersionMeta};
 use crate::cli::Context;
-use crate::ids::PaperId;
+use crate::commands::paper::ReportBuilder;
 use crate::iacr::http;
 use crate::iacr::landing;
-use crate::sources;
 use crate::ids::version::Canonical;
-use crate::commands::paper::ReportBuilder;
+use crate::ids::PaperId;
+use crate::sources;
 use anyhow::Result;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
@@ -35,7 +35,9 @@ pub async fn ensure_version(
 
     // Is this the paper's current version? It picks the PDF URL, and whether
     // the landing page's bib/abstract apply to this version.
-    let current = paper_meta.as_deref().and_then(|p| p.current_version.as_ref());
+    let current = paper_meta
+        .as_deref()
+        .and_then(|p| p.current_version.as_ref());
     let is_current = current == Some(version);
     debug!(
         id = %id,
@@ -46,7 +48,15 @@ pub async fn ensure_version(
     );
 
     // Pull the bytes from the first source that has them.
-    let acquired = sources::acquire(cx, &sources::PdfRequest { id, version, is_current }).await?;
+    let acquired = sources::acquire(
+        cx,
+        &sources::PdfRequest {
+            id,
+            version,
+            is_current,
+        },
+    )
+    .await?;
     anyhow::ensure!(
         http::looks_like_pdf(&acquired.bytes),
         "{} bytes for {} version {} (source: {}) don't look like a PDF (missing %PDF header)",
@@ -59,7 +69,11 @@ pub async fn ensure_version(
     if acquired.network {
         report.add_downloaded(acquired.bytes.len() as u64);
     }
-    report.action(if is_current { "fetched-pdf" } else { "fetched-historical-pdf" });
+    report.action(if is_current {
+        "fetched-pdf"
+    } else {
+        "fetched-historical-pdf"
+    });
 
     // Scrape the landing page for metadata when:
     //   * we're on the current version (its canonical bib/abstract live there), OR
@@ -115,7 +129,10 @@ pub async fn ensure_version(
         }
     }
 
-    let vmeta = VersionMeta { fetched_unix_s: Some(now_unix()), md_converter: None };
+    let vmeta = VersionMeta {
+        fetched_unix_s: Some(now_unix()),
+        md_converter: None,
+    };
     cache::write_version_meta(root, id, version, &vmeta).await?;
     Ok(())
 }

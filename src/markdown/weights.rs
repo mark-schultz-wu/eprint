@@ -97,13 +97,19 @@ pub async fn ensure(cx: &Context) -> Result<PathBuf> {
 /// Delete weights for revisions other than the pinned one (left behind when
 /// an upgrade re-pins the model), so they don't silently hold gigabytes.
 fn prune_other_revisions(current: &Path) {
-    let (Some(parent), Some(keep)) = (current.parent(), current.file_name()) else { return };
-    let Ok(entries) = std::fs::read_dir(parent) else { return };
+    let (Some(parent), Some(keep)) = (current.parent(), current.file_name()) else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return;
+    };
     for entry in entries.flatten() {
         if entry.file_name() != keep && entry.path().is_dir() {
             match std::fs::remove_dir_all(entry.path()) {
                 Ok(()) => info!(dir = %entry.path().display(), "removed stale model revision"),
-                Err(e) => tracing::warn!(dir = %entry.path().display(), error = %e, "could not remove stale model revision"),
+                Err(e) => {
+                    tracing::warn!(dir = %entry.path().display(), error = %e, "could not remove stale model revision")
+                }
             }
         }
     }
@@ -134,10 +140,18 @@ fn download_client(cx: &Context) -> Result<reqwest::Client> {
         .context("building download client")
 }
 
-async fn download(client: &reqwest::Client, dir: &Path, f: &ModelFile, progress: bool) -> Result<()> {
+async fn download(
+    client: &reqwest::Client,
+    dir: &Path,
+    f: &ModelFile,
+    progress: bool,
+) -> Result<()> {
     let dest = dir.join(f.name);
     let part = dir.join(format!("{}.part", f.name));
-    let url = format!("https://huggingface.co/{REPO}/resolve/{REVISION}/{}", f.name);
+    let url = format!(
+        "https://huggingface.co/{REPO}/resolve/{REVISION}/{}",
+        f.name
+    );
 
     // Resume: hash whatever an earlier attempt already wrote, then ask for the rest.
     let mut hasher = Sha256::new();
@@ -162,7 +176,9 @@ async fn download(client: &reqwest::Client, dir: &Path, f: &ModelFile, progress:
             req = req.header(reqwest::header::RANGE, format!("bytes={have}-"));
         }
         let resp = req.send().await.with_context(|| format!("GET {url}"))?;
-        let resp = resp.error_for_status().with_context(|| format!("GET {url}"))?;
+        let resp = resp
+            .error_for_status()
+            .with_context(|| format!("GET {url}"))?;
         if have > 0 && resp.status() != reqwest::StatusCode::PARTIAL_CONTENT {
             // Server ignored the range; start over.
             hasher = Sha256::new();
@@ -226,7 +242,10 @@ mod tests {
     #[test]
     fn model_dir_is_keyed_by_revision() {
         let d = model_dir(Path::new("/c"));
-        assert_eq!(d, Path::new("/c/models/MinerU2.5-Pro-2605-1.2B/bff20d4ae2bf"));
+        assert_eq!(
+            d,
+            Path::new("/c/models/MinerU2.5-Pro-2605-1.2B/bff20d4ae2bf")
+        );
     }
 
     #[test]

@@ -65,7 +65,10 @@ pub fn build_sources(cx: &Context) -> Vec<Box<dyn PdfSource>> {
     let mut sources: Vec<Box<dyn PdfSource>> = Vec::new();
     // S3RequesterPaysSource will be inserted here.
     match http::client(cx.cfg.network.contact.as_deref()) {
-        Ok(client) => sources.push(Box::new(EprintHttpSource::new(client, cx.rate_limiter.clone()))),
+        Ok(client) => sources.push(Box::new(EprintHttpSource::new(
+            client,
+            cx.rate_limiter.clone(),
+        ))),
         Err(e) => warn!(error = %e, "skipping eprint-http source: could not build HTTP client"),
     }
     sources

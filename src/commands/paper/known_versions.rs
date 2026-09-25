@@ -2,20 +2,16 @@
 //! `PaperMeta.known_versions` / `current_version`. Returns the updated
 //! meta on success; errors propagate (caller can demote to warn).
 
-use crate::iacr::archive;
 use crate::cache::{self, PaperMeta, TOOL_TAG};
 use crate::cli::Context;
-use crate::ids::PaperId;
+use crate::iacr::archive;
 use crate::iacr::http;
+use crate::ids::PaperId;
 use anyhow::Result;
 
 /// Fetch the archive listing for `id` and merge into a fresh `PaperMeta`.
 /// If `existing` is `Some`, preserves its `title` and any extra fields.
-pub async fn refresh(
-    cx: &Context,
-    id: PaperId,
-    existing: Option<PaperMeta>,
-) -> Result<PaperMeta> {
+pub async fn refresh(cx: &Context, id: PaperId, existing: Option<PaperMeta>) -> Result<PaperMeta> {
     let client = http::client(cx.cfg.network.contact.as_deref())?;
     let versions = archive::fetch_versions(&client, &cx.rate_limiter, &id.archive_url()).await?;
     let canonical_list: Vec<crate::ids::version::Canonical> =

@@ -10,8 +10,8 @@
 //! `<resumptionToken>` and `<error code="...">` for pagination + error
 //! handling respectively.
 
-use crate::ids::PaperId;
 use crate::iacr::http::{self, RateLimiter};
+use crate::ids::PaperId;
 use anyhow::{Context as _, Result};
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -202,7 +202,10 @@ pub fn parse_record(xml: &str) -> Result<Option<Record>> {
 fn on_record_error(e: &quick_xml::events::BytesStart<'_>) -> Result<Option<Record>> {
     match attr(e, "code").as_deref() {
         Some("idDoesNotExist") | Some("noRecordsMatch") => Ok(None),
-        other => anyhow::bail!("OAI-PMH GetRecord error: code={}", other.unwrap_or("unknown")),
+        other => anyhow::bail!(
+            "OAI-PMH GetRecord error: code={}",
+            other.unwrap_or("unknown")
+        ),
     }
 }
 
@@ -303,7 +306,10 @@ pub fn parse_page(xml: &str) -> Result<PageResult> {
             }
             Ok(Event::Eof) => break,
             Err(e) => {
-                return Err(anyhow::anyhow!("XML parse error at position {}: {e}", reader.buffer_position()))
+                return Err(anyhow::anyhow!(
+                    "XML parse error at position {}: {e}",
+                    reader.buffer_position()
+                ))
             }
             _ => {}
         }
@@ -418,7 +424,10 @@ mod tests {
     fn parses_get_record() {
         let r = parse_record(GETRECORD_SAMPLE).unwrap().unwrap();
         assert_eq!(r.datestamp, "2023-04-11T20:49:58Z");
-        assert_eq!(r.title.as_deref(), Some("Error Correction and Ciphertext Quantization"));
+        assert_eq!(
+            r.title.as_deref(),
+            Some("Error Correction and Ciphertext Quantization")
+        );
         assert_eq!(r.abstract_.as_deref(), Some("An interesting abstract."));
     }
 
@@ -439,8 +448,10 @@ mod tests {
         assert!(parse_oai_identifier("oai:arxiv.org:2024.0001").is_none());
         assert_eq!(
             parse_oai_identifier("oai:eprint.iacr.org:2024/463"),
-            Some(PaperId { year: 2024, num: 463 })
+            Some(PaperId {
+                year: 2024,
+                num: 463
+            })
         );
     }
-
 }

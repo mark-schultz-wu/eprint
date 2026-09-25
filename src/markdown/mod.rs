@@ -48,7 +48,11 @@ pub async fn convert(cx: &Context, pdf: &Path, pages_dir: &Path) -> Result<Strin
         pdf: pdf.to_owned(),
         pages_dir: pages_dir.to_owned(),
         model_dir,
-        device: cx.cfg.md_device.clone().unwrap_or_else(|| default_device().to_owned()),
+        device: cx
+            .cfg
+            .md_device
+            .clone()
+            .unwrap_or_else(|| default_device().to_owned()),
         progress: !cx.json,
     };
     tokio::task::spawn_blocking(move || job.run())
@@ -66,14 +70,17 @@ struct Job {
 
 impl Job {
     fn run(self) -> Result<String> {
-        let bytes = std::fs::read(&self.pdf).with_context(|| format!("reading {}", self.pdf.display()))?;
+        let bytes =
+            std::fs::read(&self.pdf).with_context(|| format!("reading {}", self.pdf.display()))?;
         let pdf = hayro::hayro_syntax::Pdf::new(bytes)
             .map_err(|e| anyhow!("could not parse {} as a PDF: {e:?}", self.pdf.display()))?;
         let pages = pdf.pages();
         std::fs::create_dir_all(&self.pages_dir)?;
         let renderer = render::Renderer::new(RENDER_DPI);
         let cache_path = |i: usize| self.pages_dir.join(format!("{:04}.json", i + 1));
-        let pending = (0..pages.len()).filter(|&i| read_page_cache(&cache_path(i)).is_none()).count();
+        let pending = (0..pages.len())
+            .filter(|&i| read_page_cache(&cache_path(i)).is_none())
+            .count();
 
         let mut model: Option<MinerU> = None;
         let mut rendered = Vec::with_capacity(pages.len());
@@ -99,7 +106,12 @@ impl Job {
                     }
                     write_page_cache(&cache_path, &doc.blocks)?;
                     if self.progress {
-                        eprintln!("  page {}/{} ({:.0}s)", i + 1, pages.len(), start.elapsed().as_secs_f64());
+                        eprintln!(
+                            "  page {}/{} ({:.0}s)",
+                            i + 1,
+                            pages.len(),
+                            start.elapsed().as_secs_f64()
+                        );
                     }
                     doc.blocks
                 }
@@ -120,8 +132,12 @@ impl Job {
     }
 
     fn load_model(&self, pending: usize, total: usize) -> Result<MinerU> {
-        let device = oar_ocr_vl::utils::parse_device(&self.device)
-            .map_err(|e| anyhow!("can't use device {:?} for Markdown conversion: {e}", self.device))?;
+        let device = oar_ocr_vl::utils::parse_device(&self.device).map_err(|e| {
+            anyhow!(
+                "can't use device {:?} for Markdown conversion: {e}",
+                self.device
+            )
+        })?;
         if self.progress {
             let pace = if self.device == "cpu" {
                 "CPU only: expect several minutes per page"
@@ -133,11 +149,18 @@ impl Job {
             } else {
                 format!("the remaining {pending} of {total} pages")
             };
-            eprintln!("Converting {what} to Markdown with MinerU2.5-Pro on {} ({pace}).", self.device);
+            eprintln!(
+                "Converting {what} to Markdown with MinerU2.5-Pro on {} ({pace}).",
+                self.device
+            );
         }
         let start = Instant::now();
-        let model = MinerU::from_dir(&self.model_dir, device)
-            .map_err(|e| anyhow!("loading MinerU2.5-Pro from {}: {e}", self.model_dir.display()))?;
+        let model = MinerU::from_dir(&self.model_dir, device).map_err(|e| {
+            anyhow!(
+                "loading MinerU2.5-Pro from {}: {e}",
+                self.model_dir.display()
+            )
+        })?;
         info!(secs = start.elapsed().as_secs_f64(), "model loaded");
         Ok(model)
     }

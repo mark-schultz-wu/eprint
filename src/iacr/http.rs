@@ -52,7 +52,9 @@ pub fn client(contact: Option<&str>) -> Result<reqwest::Client> {
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert(
         reqwest::header::USER_AGENT,
-        user_agent(contact).parse().context("invalid User-Agent header")?,
+        user_agent(contact)
+            .parse()
+            .context("invalid User-Agent header")?,
     );
     reqwest::Client::builder()
         .default_headers(headers)
@@ -67,8 +69,11 @@ pub fn client(contact: Option<&str>) -> Result<reqwest::Client> {
 /// 429 with no `Retry-After` header. Observed recovery ranged from under 10 s
 /// to ~1–2 min (consistent with a sliding window of about a minute), so the
 /// schedule escalates to cover the slow case: 105 s total before giving up.
-const RETRY_BACKOFFS: [Duration; 3] =
-    [Duration::from_secs(15), Duration::from_secs(30), Duration::from_secs(60)];
+const RETRY_BACKOFFS: [Duration; 3] = [
+    Duration::from_secs(15),
+    Duration::from_secs(30),
+    Duration::from_secs(60),
+];
 
 /// Upper bound on a server-supplied `Retry-After`, so a hostile or buggy
 /// header can't park us for hours.
@@ -96,9 +101,16 @@ pub async fn get_bytes(client: &reqwest::Client, rl: &RateLimiter, url: &str) ->
         for attempt in 0.. {
             rl.until_ready().await;
             debug!(attempt, "rate limiter granted");
-            let resp = client.get(url).send().await.with_context(|| format!("GET {url}"))?;
+            let resp = client
+                .get(url)
+                .send()
+                .await
+                .with_context(|| format!("GET {url}"))?;
             if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-                let retry_after = resp.headers().get("Retry-After").and_then(|v| v.to_str().ok());
+                let retry_after = resp
+                    .headers()
+                    .get("Retry-After")
+                    .and_then(|v| v.to_str().ok());
                 let Some(delay) = retry_delay(attempt, retry_after) else {
                     anyhow::bail!(
                         "eprint.iacr.org kept returning 429 (rate limited) for {url} after {} \
@@ -115,7 +127,9 @@ pub async fn get_bytes(client: &reqwest::Client, rl: &RateLimiter, url: &str) ->
                 tokio::time::sleep(delay).await;
                 continue;
             }
-            let resp = resp.error_for_status().with_context(|| format!("GET {url}"))?;
+            let resp = resp
+                .error_for_status()
+                .with_context(|| format!("GET {url}"))?;
             info!(bytes = ?resp.content_length(), "fetched");
             return Ok(resp.bytes().await?);
         }
@@ -142,7 +156,9 @@ mod tests {
 
     #[test]
     fn schedule_without_retry_after_then_gives_up() {
-        let got: Vec<_> = (0..=RETRY_BACKOFFS.len()).map(|a| retry_delay(a, None)).collect();
+        let got: Vec<_> = (0..=RETRY_BACKOFFS.len())
+            .map(|a| retry_delay(a, None))
+            .collect();
         let mut want: Vec<_> = RETRY_BACKOFFS.iter().copied().map(Some).collect();
         want.push(None);
         assert_eq!(got, want);
