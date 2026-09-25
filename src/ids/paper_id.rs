@@ -38,7 +38,10 @@ impl fmt::Display for PaperId {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("unrecognized eprint id {0:?}; expected forms like '2024/463', '2024-463', or a full eprint.iacr.org URL")]
+#[error(
+    "unrecognized eprint id {0:?}; expected forms like '2024/463', '2024-463', or a full \
+     eprint.iacr.org URL (`eprint --help` lists the commands, if you meant one)"
+)]
 pub struct ParseError(String);
 
 impl std::str::FromStr for PaperId {

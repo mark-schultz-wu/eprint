@@ -1,15 +1,22 @@
 //! Clap-derive CLI structures.
 //!
-//! Top-level shape: a bareword `eprint <id>` form (no subcommand) is the
-//! default, used for describe/fetch/convert. Explicit subcommands cover
+//! Top-level shape: `eprint paper <id>` fetches/describes/converts a paper,
+//! and a bare `eprint <id>` is shorthand for it. The other subcommands cover
 //! discrete operations: `sync`, `feed`, `cache`.
 
 use crate::config::Config;
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, CommandFactory, Parser, Subcommand, ValueEnum};
+use std::ffi::OsString;
 
 /// Fetch, describe, and convert IACR ePrint papers.
 #[derive(Debug, Parser)]
-#[command(name = "eprint", version, about, arg_required_else_help = true)]
+#[command(
+    name = "eprint",
+    version,
+    about,
+    arg_required_else_help = true,
+    after_help = "Shorthand: `eprint <ID> [OPTIONS]` is `eprint paper <ID> [OPTIONS]`."
+)]
 pub struct Cli {
     /// Never make network requests; error if cache miss.
     #[arg(long, global = true)]
@@ -33,6 +40,47 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Command,
+}
+
+/// Rewrite the shorthand `eprint [globals] <id> ...` to
+/// `eprint [globals] paper <id> ...`: if the first positional argument isn't
+/// a subcommand (or `help`), it's a paper id. Top-level options and their
+/// values are skipped when looking for it, using clap's own definition of
+/// the command, so this can't drift from the real CLI.
+pub fn expand_shorthand(argv: Vec<OsString>) -> Vec<OsString> {
+    let cmd = Cli::command();
+    let is_subcommand = |s: &str| {
+        s == "help"
+            || cmd
+                .get_subcommands()
+                .any(|c| c.get_name() == s || c.get_all_aliases().any(|a| a == s))
+    };
+    let takes_value = |flag: &str| {
+        cmd.get_arguments().any(|a| {
+            let named = a.get_long().is_some_and(|l| flag == format!("--{l}"))
+                || a.get_short().is_some_and(|c| flag == format!("-{c}"));
+            named && a.get_action().takes_values()
+        })
+    };
+
+    let mut i = 1; // argv[0] is the program
+    while let Some(arg) = argv.get(i).and_then(|a| a.to_str()) {
+        if arg == "--" || !arg.starts_with('-') {
+            if !arg.starts_with('-') && !is_subcommand(arg) {
+                let mut out = argv;
+                out.insert(i, "paper".into());
+                return out;
+            }
+            break;
+        }
+        // Skip an option, and its value if given separately (`--opt value`).
+        i += if !arg.contains('=') && takes_value(arg) {
+            2
+        } else {
+            1
+        };
+    }
+    argv
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -72,10 +120,10 @@ pub struct Context {
 pub struct PaperArgs {
     /// Paper id (e.g. "2024/463", "2024-463", or full eprint URL).
     pub id: String,
-    /// Operate on a specific historical version (canonical timestamp,
-    /// e.g. `20240319T143540Z`). Defaults to current.
-    #[arg(long)]
-    pub version: Option<String>,
+    /// Operate on a specific version of the paper, by its timestamp (e.g.
+    /// `20240319T143540Z`; see the version list). Defaults to the current one.
+    #[arg(long, value_name = "VERSION")]
+    pub at: Option<String>,
     /// Open an interactive picker over known versions.
     #[arg(long)]
     pub select_version: bool,
@@ -83,7 +131,8 @@ pub struct PaperArgs {
     /// half a minute per page on a GPU. Downloads a 2.2 GB model on first use.
     #[arg(long)]
     pub md: bool,
-    /// Skip the staleness check; always hit the network.
+    /// Re-fetch the paper's version list from eprint even if the cached one
+    /// looks current.
     #[arg(long)]
     pub force: bool,
     /// Skip printing the abstract at the bottom of the human-readable output.
@@ -175,6 +224,96 @@ mod tests {
         let cli = Cli::try_parse_from(["eprint", "cache", "path"]).unwrap();
         assert_eq!(cli.auto_sync, None);
         assert_eq!(cli.sync_stale_hours, None);
+    }
+
+    fn parse(argv: &[&str]) -> Result<Cli, clap::Error> {
+        Cli::try_parse_from(expand_shorthand(argv.iter().map(OsString::from).collect()))
+    }
+
+    fn expanded(argv: &[&str]) -> Vec<String> {
+        expand_shorthand(argv.iter().map(OsString::from).collect())
+            .into_iter()
+            .map(|a| a.into_string().unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn bare_id_is_shorthand_for_paper() {
+        for argv in [
+            &[
+                "eprint",
+                "paper",
+                "2024/463",
+                "--at",
+                "20240319T143540Z",
+                "--md",
+            ][..],
+            &["eprint", "2024/463", "--at", "20240319T143540Z", "--md"],
+        ] {
+            let Command::Paper(p) = parse(argv).unwrap().command else {
+                panic!("{argv:?} should be a paper command");
+            };
+            assert_eq!(p.id, "2024/463");
+            assert_eq!(p.at.as_deref(), Some("20240319T143540Z"));
+            assert!(p.md);
+        }
+    }
+
+    #[test]
+    fn shorthand_skips_global_options_and_their_values() {
+        assert_eq!(
+            expanded(&[
+                "eprint",
+                "--json",
+                "--log-format",
+                "json",
+                "-vv",
+                "2024/463"
+            ]),
+            [
+                "eprint",
+                "--json",
+                "--log-format",
+                "json",
+                "-vv",
+                "paper",
+                "2024/463"
+            ]
+        );
+        assert_eq!(
+            expanded(&["eprint", "--auto-sync=no", "2024/463", "--json"]),
+            ["eprint", "--auto-sync=no", "paper", "2024/463", "--json"]
+        );
+        let cli = parse(&["eprint", "--offline", "2024/463", "--json"]).unwrap();
+        assert!(cli.offline && cli.json);
+    }
+
+    /// Regression guard: global flags before a real subcommand must leave it
+    /// a subcommand (clap's args-conflict-with-subcommands mode broke this).
+    #[test]
+    fn subcommands_and_help_are_left_alone() {
+        for argv in [
+            &["eprint", "--json", "cache", "list"][..],
+            &["eprint", "--auto-sync", "yes", "sync"],
+            &["eprint", "p", "2024/463"],
+            &["eprint", "help"],
+            &["eprint", "--version"],
+            &["eprint"],
+        ] {
+            assert_eq!(expanded(argv), argv, "{argv:?}");
+        }
+        assert!(matches!(
+            parse(&["eprint", "--json", "cache", "list"])
+                .unwrap()
+                .command,
+            Command::Cache(_)
+        ));
+    }
+
+    #[test]
+    fn version_flag_still_means_the_tool_version() {
+        let err = parse(&["eprint", "--version"]).unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
     }
 
     #[test]

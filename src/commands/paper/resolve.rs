@@ -1,5 +1,5 @@
 //! Pick which version of a paper the caller wants. Priority:
-//! 1. `--version <ts>` (explicit pin)
+//! 1. `--at <version>` (explicit pin)
 //! 2. `--select-version` (interactive picker via `dialoguer`)
 //! 3. `paper_meta.current_version` (the default)
 
@@ -15,10 +15,10 @@ pub async fn target_version(
     paper_meta: Option<&PaperMeta>,
     args: &PaperArgs,
 ) -> Result<Option<Canonical>> {
-    if let Some(v) = &args.version {
-        let parsed: Canonical = v.parse().with_context(|| {
-            format!("--version {v:?} is not canonical timestamp YYYYMMDDTHHMMSSZ")
-        })?;
+    if let Some(v) = &args.at {
+        let parsed: Canonical = v
+            .parse()
+            .with_context(|| format!("--at {v:?} is not a version timestamp (YYYYMMDDTHHMMSSZ)"))?;
         return Ok(Some(parsed));
     }
     if args.select_version {

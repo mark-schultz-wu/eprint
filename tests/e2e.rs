@@ -172,7 +172,7 @@ async fn historical_version_is_fetched_by_timestamp() {
     h.serve_paper(&[(V1, V1_UNIX, PDF_V1), (V2, V2_UNIX, PDF_V2)])
         .await;
 
-    let out = h.run(&["--json", "paper", ID, "--version", V1], &[]).await;
+    let out = h.run(&["--json", "paper", ID, "--at", V1], &[]).await;
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(json(&out)["resolved_version"], V1);
     assert_eq!(read(&h.version_dir(V1).join("paper.pdf")), PDF_V1);
@@ -384,7 +384,7 @@ async fn report_counts_actions_bytes_and_cached_versions() {
 
     // A second historical fetch: the title is already known, so the landing
     // page isn't requested again, and both versions now show as cached.
-    let report = json(&h.run(&["--json", "paper", ID, "--version", V1], &[]).await);
+    let report = json(&h.run(&["--json", "paper", ID, "--at", V1], &[]).await);
     assert_eq!(
         report["actions"],
         serde_json::json!(["fetched-historical-pdf"])
@@ -401,7 +401,8 @@ async fn human_output_lists_versions_actions_and_abstract() {
     h.serve_paper(&[(V1, V1_UNIX, PDF_V1), (V2, V2_UNIX, PDF_V2)])
         .await;
 
-    let out = stdout(&h.run(&["paper", ID, "--version", V1], &[]).await);
+    // The bare `eprint <id>` shorthand.
+    let out = stdout(&h.run(&[ID, "--at", V1], &[]).await);
     assert!(out.starts_with("2024/463\n"), "{out}");
     assert!(
         out.contains(&format!("  title:            {TITLE}\n")),
@@ -529,9 +530,7 @@ async fn offline_skips_network_sources() {
     assert!(h.run(&["paper", ID], &[]).await.status.success());
     h.server.reset().await;
 
-    let out = h
-        .run(&["--offline", "paper", ID, "--version", V1], &[])
-        .await;
+    let out = h.run(&["--offline", "paper", ID, "--at", V1], &[]).await;
     assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
     assert!(
         stderr(&out).contains("--offline skips network sources"),

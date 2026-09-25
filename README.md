@@ -16,14 +16,16 @@ Requires Rust 1.95+.
 ## Usage
 
 ```
-eprint paper 2024/463                   # metadata, PDF, BibTeX, abstract → cache
-eprint paper 2024/463 --md              # … plus Markdown (see below)
-eprint paper 2024/463 --version 20240319T143540Z   # a historical version
-eprint paper 2024/463 --select-version  # pick a version interactively
+eprint 2024/463                         # metadata, PDF, BibTeX, abstract → cache
+eprint 2024/463 --md                    # … plus Markdown (see below)
+eprint 2024/463 --at 20240319T143540Z   # a specific (e.g. older) version
+eprint 2024/463 --select-version        # pick a version interactively
 eprint sync                             # OAI-PMH refresh of cached papers' versions
 eprint feed [new|updates] --category publickey
 eprint cache {path,list,clear}          # clear keeps the Markdown model; --models drops it
 ```
+
+`eprint <id> ...` is shorthand for `eprint paper <id> ...`.
 
 Global flags: `--offline`, `--json`, `-v`/`-vv`/`-vvv`, `--log-format=json`.
 Paper ids can be `2024/463`, `2024-463`, or a full eprint URL. Scripts can

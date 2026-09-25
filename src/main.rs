@@ -16,7 +16,7 @@ use tracing_subscriber::{prelude::*, EnvFilter};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let args = cli::Cli::parse();
+    let args = cli::Cli::parse_from(cli::expand_shorthand(std::env::args_os().collect()));
     init_tracing(args.verbose, args.log_format);
     let mut cfg = config::Config::from_env();
     if let Some(v) = args.auto_sync {
