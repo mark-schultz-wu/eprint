@@ -1,12 +1,11 @@
 //! `eprint sync` — OAI-PMH bulk annotation.
 //!
-//! For every paper in the cache that appears in OAI-PMH `ListRecords?from=X`,
-//! we convert the OAI datestamp to canonical form and add it to
-//! `known_versions`. If the canonical timestamp is newer than
-//! `current_version`, the paper is implicitly stale (no separate flag).
+//! For every cached paper that appears in OAI-PMH `ListRecords?from=X`, we
+//! record the OAI datestamp (its last modification) as the paper's
+//! `last_modified` hint. The next `eprint paper <id>` sees the hint is newer
+//! than its last archive listing and re-lists, picking up any new version.
 //!
-//! Annotate-only: never downloads PDFs. Next `eprint <id>` notices the
-//! newer known_version and pulls if it needs to.
+//! Annotate-only: never downloads anything but OAI metadata.
 
 use crate::cache;
 use crate::cli::{Context, SyncArgs};
@@ -103,11 +102,7 @@ async fn sync_impl(
             continue;
         };
         let oai: version::OaiDatestamp = rec.datestamp.parse()?;
-        let canonical: version::Canonical = (&oai).into();
-        if !paper_meta.known_versions.contains(&canonical) {
-            paper_meta.known_versions.push(canonical);
-            paper_meta.known_versions.sort();
-            paper_meta.known_versions.dedup();
+        if paper_meta.note_modified((&oai).into()) {
             cache::write_paper_meta(root, rec.id, &paper_meta).await?;
             updated += 1;
         }

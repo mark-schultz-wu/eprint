@@ -10,10 +10,6 @@ pub struct PaperId {
 }
 
 impl PaperId {
-    pub fn pdf_url(&self) -> String {
-        format!("https://eprint.iacr.org/{}.pdf", self.canonical())
-    }
-
     pub fn html_url(&self) -> String {
         format!("https://eprint.iacr.org/{}", self.canonical())
     }
@@ -128,7 +124,6 @@ mod tests {
             num: 18,
         };
         assert_eq!(id.canonical(), "2020/018");
-        assert_eq!(id.pdf_url(), "https://eprint.iacr.org/2020/018.pdf");
         assert_eq!(id.html_url(), "https://eprint.iacr.org/2020/018");
         assert_eq!(
             id.archive_url(),
@@ -144,8 +139,8 @@ mod tests {
                 year: 2024,
                 num: 1234
             }
-            .pdf_url(),
-            "https://eprint.iacr.org/2024/1234.pdf"
+            .html_url(),
+            "https://eprint.iacr.org/2024/1234"
         );
     }
 

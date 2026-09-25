@@ -30,8 +30,8 @@ mod meta;
 pub mod scan;
 
 pub use meta::{
-    read_last_sync, read_paper_meta, read_version_meta, write_last_sync, write_paper_meta,
-    write_version_meta, PaperMeta, VersionMeta,
+    purge_if_outdated, read_last_sync, read_paper_meta, read_version_meta, write_last_sync,
+    write_paper_meta, write_version_meta, PaperMeta, VersionMeta,
 };
 
 use crate::ids::version::Canonical;

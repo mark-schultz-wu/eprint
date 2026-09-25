@@ -15,7 +15,7 @@ mod fetch;
 mod known_versions;
 mod resolve;
 
-use crate::cache;
+use crate::cache::{self, PaperMeta};
 use crate::cli::{Context, PaperArgs};
 use crate::iacr::http;
 use crate::iacr::oai;
@@ -109,15 +109,17 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     crate::commands::sync::maybe_auto_sync(cx).await?;
 
     let mut report = ReportBuilder::new(id.canonical());
-
-    // 1. Refresh the archive listing if needed.
     let root = &cx.cfg.cache_root;
+
+    // 0. Entries from an older cache format may hold mislabeled PDFs; start over.
+    if cache::purge_if_outdated(root, id).await? {
+        report.action("purged-outdated-cache");
+    }
+
+    // 1. Refresh the archive listing if we have none, or `sync` saw the
+    //    paper change since the last listing.
     let mut paper_meta = cache::read_paper_meta(root, id).await;
-    let need_archive = args.force
-        || paper_meta
-            .as_ref()
-            .map(|p| p.known_versions.is_empty())
-            .unwrap_or(true);
+    let need_archive = args.force || paper_meta.as_ref().is_none_or(PaperMeta::needs_listing);
     if need_archive && !cx.offline {
         match known_versions::refresh(cx, id, paper_meta.clone()).await {
             Ok(new_meta) => {
@@ -147,7 +149,7 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
                     let cv: version::Canonical = (&ds).into();
                     let mut pm = paper_meta
                         .take()
-                        .unwrap_or_else(|| cache::PaperMeta::for_first_fetch(cv));
+                        .unwrap_or_else(|| PaperMeta::for_first_fetch(cv));
                     pm.current_version = Some(cv);
                     if !pm.known_versions.contains(&cv) {
                         pm.known_versions.push(cv);

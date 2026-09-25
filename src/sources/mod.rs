@@ -27,10 +27,6 @@ use tracing::{info, warn};
 pub struct PdfRequest<'a> {
     pub id: PaperId,
     pub version: &'a Canonical,
-    /// True iff `version` is the paper's current version. eprint serves the
-    /// current and historical PDFs from different URLs; the S3 bucket may only
-    /// hold the current one.
-    pub is_current: bool,
 }
 
 /// Bytes plus provenance, so the caller can label the action it took.
@@ -55,10 +51,10 @@ pub trait PdfSource: Send + Sync {
 // A requester-pays S3 bucket is planned. It will be another `PdfSource` in
 // its own module (`is_network() == true`), inserted in `build_sources` *ahead* of
 // `EprintHttpSource`. Open question that shapes its `fetch`: whether the bucket
-// is keyed by arbitrary version ids or only carries the current PDF. If
-// current-only, it returns `Ok(None)` for `!req.is_current`; if it supports
-// versions, it keys the object on `req.version`. Either way the rest of the
-// pipeline is unchanged.
+// is keyed by version or only carries the current PDF. If current-only, it
+// must return `Ok(None)` unless it can confirm the object is `req.version`
+// (never hand back bytes for a different version); if keyed by version, it
+// uses `req.version`. Either way the rest of the pipeline is unchanged.
 
 /// Build the ordered source list for this run. Order = priority.
 pub fn build_sources(cx: &Context) -> Vec<Box<dyn PdfSource>> {
@@ -125,11 +121,7 @@ fn unavailable_message(cx: &Context, req: &PdfRequest<'_>, tried: &[String]) -> 
              Re-run without --offline to fetch it."
         );
     } else {
-        let url = if req.is_current {
-            req.id.pdf_url()
-        } else {
-            req.id.historical_pdf_url(req.version)
-        };
+        let url = req.id.historical_pdf_url(req.version);
         let _ = write!(
             m,
             "Fetching {url} failed (reason above). If eprint.iacr.org was rate-limiting, wait a \

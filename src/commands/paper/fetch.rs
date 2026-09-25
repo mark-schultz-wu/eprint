@@ -33,8 +33,8 @@ pub async fn ensure_version(
     }
     tokio::fs::create_dir_all(&paths.dir).await?;
 
-    // Is this the paper's current version? It picks the PDF URL, and whether
-    // the landing page's bib/abstract apply to this version.
+    // Is this the paper's current version? The landing page's bib/abstract
+    // describe only the current version.
     let current = paper_meta
         .as_deref()
         .and_then(|p| p.current_version.as_ref());
@@ -48,15 +48,7 @@ pub async fn ensure_version(
     );
 
     // Pull the bytes from the first source that has them.
-    let acquired = sources::acquire(
-        cx,
-        &sources::PdfRequest {
-            id,
-            version,
-            is_current,
-        },
-    )
-    .await?;
+    let acquired = sources::acquire(cx, &sources::PdfRequest { id, version }).await?;
     anyhow::ensure!(
         http::looks_like_pdf(&acquired.bytes),
         "{} bytes for {} version {} (source: {}) don't look like a PDF (missing %PDF header)",
