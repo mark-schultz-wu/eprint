@@ -7,6 +7,7 @@ use crate::ids::PaperId;
 use serde::{Deserialize, Serialize};
 use std::io;
 use std::path::Path;
+use time::OffsetDateTime;
 
 /// Version of the paper-cache format. Papers cached under an older schema
 /// are purged on next use ([`purge_if_outdated`]). History:
@@ -101,8 +102,15 @@ impl PaperMeta {
 /// Per-version state. Lives at `<root>/<year>/<num>/<version>/meta.json`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct VersionMeta {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub fetched_unix_s: Option<i64>,
+    /// When the PDF was fetched. Stored as unix seconds under its original
+    /// key, so older caches still read.
+    #[serde(
+        rename = "fetched_unix_s",
+        with = "time::serde::timestamp::option",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub fetched: Option<OffsetDateTime>,
     /// [`crate::markdown::CONVERTER_ID`] of the converter that produced
     /// `paper.md`; `None` if it hasn't been generated. (Older caches carried
     /// `md_quality` / `mineru_version` instead; serde ignores those, so such
@@ -154,15 +162,16 @@ pub async fn write_version_meta(
     tokio::fs::write(paths.meta, to_json(meta)?).await
 }
 
-/// Unix time `eprint sync` last completed, if it ever has.
-pub async fn read_last_sync(root: &Path) -> Option<i64> {
+/// When `eprint sync` last completed, if it ever has. (The stamp file holds
+/// unix seconds.)
+pub async fn read_last_sync(root: &Path) -> Option<OffsetDateTime> {
     let s = tokio::fs::read_to_string(last_sync_path(root)).await.ok()?;
-    s.trim().parse().ok()
+    OffsetDateTime::from_unix_timestamp(s.trim().parse().ok()?).ok()
 }
 
-pub async fn write_last_sync(root: &Path, unix_s: i64) -> io::Result<()> {
+pub async fn write_last_sync(root: &Path, at: OffsetDateTime) -> io::Result<()> {
     tokio::fs::create_dir_all(root).await?;
-    tokio::fs::write(last_sync_path(root), unix_s.to_string()).await
+    tokio::fs::write(last_sync_path(root), at.unix_timestamp().to_string()).await
 }
 
 fn to_json(value: &impl Serialize) -> io::Result<Vec<u8>> {
@@ -276,19 +285,38 @@ mod tests {
         );
     }
 
+    /// `fetched` keeps the original on-disk form: `"fetched_unix_s": <secs>`.
+    #[test]
+    fn version_meta_stores_fetched_time_as_unix_seconds() {
+        let meta = VersionMeta {
+            fetched: Some(time::macros::datetime!(2023-11-14 22:13:20 UTC)),
+            md_converter: None,
+        };
+        let json = serde_json::to_string(&meta).unwrap();
+        assert_eq!(json, r#"{"fetched_unix_s":1700000000}"#);
+        let back: VersionMeta = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.fetched, meta.fetched);
+        let empty: VersionMeta = serde_json::from_str("{}").unwrap();
+        assert!(empty.fetched.is_none());
+    }
+
     #[tokio::test]
     async fn missing_version_meta_reads_as_default() {
         let root = tempfile::tempdir().unwrap();
         let v: Canonical = "20240319T143540Z".parse().unwrap();
         let m = read_version_meta(root.path(), PaperId { year: 2024, num: 1 }, &v).await;
-        assert!(m.fetched_unix_s.is_none() && m.md_converter.is_none());
+        assert!(m.fetched.is_none() && m.md_converter.is_none());
     }
 
     #[tokio::test]
     async fn last_sync_round_trips() {
         let root = tempfile::tempdir().unwrap();
         assert_eq!(read_last_sync(root.path()).await, None);
-        write_last_sync(root.path(), 1_700_000_000).await.unwrap();
-        assert_eq!(read_last_sync(root.path()).await, Some(1_700_000_000));
+        let at = time::macros::datetime!(2023-11-14 22:13:20 UTC);
+        write_last_sync(root.path(), at).await.unwrap();
+        assert_eq!(read_last_sync(root.path()).await, Some(at));
+        // The on-disk format is plain unix seconds.
+        let raw = std::fs::read_to_string(last_sync_path(root.path())).unwrap();
+        assert_eq!(raw, "1700000000");
     }
 }

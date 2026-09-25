@@ -23,7 +23,7 @@ async fn main() -> Result<()> {
         cfg.sync.auto = v;
     }
     if let Some(h) = args.sync_stale_hours {
-        cfg.sync.stale_after_hours = h;
+        cfg.sync.stale_after = time::Duration::hours(h.into());
     }
     let rate_limiter = iacr::http::rate_limiter(cfg.network.min_interval_s, 3);
     let cx = cli::Context {

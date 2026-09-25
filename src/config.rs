@@ -42,7 +42,8 @@ pub struct Network {
 #[derive(Debug, Clone)]
 pub struct Sync {
     pub auto: bool,
-    pub stale_after_hours: u32,
+    /// How old the last sync may get before auto-sync runs again.
+    pub stale_after: time::Duration,
 }
 
 impl Config {
@@ -59,7 +60,9 @@ impl Config {
             md_device: env_string("EPRINT_MD_DEVICE"),
             sync: Sync {
                 auto: env_bool("EPRINT_AUTO_SYNC").unwrap_or(true),
-                stale_after_hours: env_u32("EPRINT_SYNC_STALE_HOURS").unwrap_or(24),
+                stale_after: time::Duration::hours(
+                    env_u32("EPRINT_SYNC_STALE_HOURS").unwrap_or(24).into(),
+                ),
             },
         }
     }

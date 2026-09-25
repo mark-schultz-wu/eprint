@@ -95,7 +95,7 @@ pub struct PaperArgs {
 pub struct SyncArgs {
     #[arg(long)]
     pub since: Option<String>,
-    #[arg(long, default_value_t = 30)]
+    #[arg(long, default_value_t = crate::commands::sync::DEFAULT_WINDOW_DAYS)]
     pub default_window_days: u32,
 }
 

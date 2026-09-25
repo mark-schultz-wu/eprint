@@ -14,7 +14,6 @@ use crate::ids::version::Canonical;
 use crate::ids::PaperId;
 use crate::sources;
 use anyhow::Result;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 
 /// Ensure `<root>/<id>/<version>/paper.pdf` exists. Acquires it if missing.
@@ -122,16 +121,9 @@ pub async fn ensure_version(
     }
 
     let vmeta = VersionMeta {
-        fetched_unix_s: Some(now_unix()),
+        fetched: Some(time::OffsetDateTime::now_utc()),
         md_converter: None,
     };
     cache::write_version_meta(root, id, version, &vmeta).await?;
     Ok(())
-}
-
-fn now_unix() -> i64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0)
 }
