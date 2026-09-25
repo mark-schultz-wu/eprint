@@ -75,7 +75,7 @@ pub struct PaperArgs {
     #[arg(long)]
     pub select_version: bool,
     /// Also produce Markdown (math as LaTeX) with MinerU2.5-Pro. Slow: about
-    /// half a minute per page on a GPU. Downloads a 2.3 GB model on first use.
+    /// half a minute per page on a GPU. Downloads a 2.2 GB model on first use.
     #[arg(long)]
     pub md: bool,
     /// Skip the staleness check; always hit the network.
@@ -145,9 +145,14 @@ pub struct CacheArgs {
 pub enum CacheCommand {
     Path,
     List,
+    /// Delete cached papers. The Markdown model is kept unless `--models`.
     Clear {
         #[arg(long)]
         dry_run: bool,
+        /// Also delete the downloaded Markdown model weights (2.2 GB; they
+        /// re-download on the next `--md`).
+        #[arg(long)]
+        models: bool,
     },
 }
 

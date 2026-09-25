@@ -38,7 +38,7 @@ a 1.2B-parameter document vision-language model, in-process via
 rasterized with [hayro](https://github.com/LaurenzV/hayro) (pure Rust), then
 parsed into blocks with LaTeX math, which become Markdown.
 
-- **Model download:** 2.3 GB on first use, into
+- **Model download:** 2.2 GB on first use, into
   `<cache>/models/`. It's pinned to a specific commit and verified by
   SHA-256, and an interrupted download resumes.
 - **Speed:** about 30–60 s per page on an Apple M2 Pro GPU, and several

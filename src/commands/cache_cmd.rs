@@ -13,7 +13,7 @@ pub async fn run(cx: &Context, args: CacheArgs) -> Result<()> {
             Ok(())
         }
         CacheCommand::List => list(cx).await,
-        CacheCommand::Clear { dry_run } => clear(cx, dry_run).await,
+        CacheCommand::Clear { dry_run, models } => clear(cx, dry_run, models).await,
     }
 }
 
@@ -83,10 +83,11 @@ async fn list(cx: &Context) -> Result<()> {
         }
     }
 
+    let models_bytes = dir_size(&models_root(root));
     if cx.json {
         println!("{}", serde_json::to_string_pretty(&papers)?);
     } else if papers.is_empty() {
-        println!("(cache is empty: {})", root.display());
+        println!("(no cached papers in {})", root.display());
     } else {
         println!("{} papers in {}", papers.len(), root.display());
         let mut total = 0u64;
@@ -101,10 +102,21 @@ async fn list(cx: &Context) -> Result<()> {
         }
         println!("  total: {}", fmt_bytes(total));
     }
+    if !cx.json {
+        if models_bytes > 0 {
+            println!("Markdown model: {} in {}", fmt_bytes(models_bytes), models_root(root).display());
+        } else {
+            println!("Markdown model: not downloaded (2.2 GB, fetched on first --md)");
+        }
+    }
     Ok(())
 }
 
-async fn clear(cx: &Context, dry_run: bool) -> Result<()> {
+fn models_root(root: &Path) -> std::path::PathBuf {
+    root.join("models")
+}
+
+async fn clear(cx: &Context, dry_run: bool, models: bool) -> Result<()> {
     let root = &cx.cfg.cache_root;
     if !root.exists() {
         println!("(cache is empty: {})", root.display());
@@ -153,6 +165,7 @@ async fn clear(cx: &Context, dry_run: bool) -> Result<()> {
                 foreign
             );
         }
+        report_models(dir_size(&models_root(root)), models, true);
         return Ok(());
     }
     for p in &to_remove {
@@ -174,7 +187,27 @@ async fn clear(cx: &Context, dry_run: bool) -> Result<()> {
             foreign
         );
     }
+    let model_bytes = dir_size(&models_root(root));
+    if models && model_bytes > 0 {
+        std::fs::remove_dir_all(models_root(root))?;
+    }
+    report_models(model_bytes, models, false);
     Ok(())
+}
+
+/// Say what happened (or would happen) to the model weights, which `clear`
+/// keeps by default because they're expensive to re-download.
+fn report_models(bytes: u64, models: bool, dry_run: bool) {
+    match (models, dry_run) {
+        (true, true) if bytes > 0 => println!("would delete the Markdown model, {}", fmt_bytes(bytes)),
+        (true, false) if bytes > 0 => println!("deleted the Markdown model, {}", fmt_bytes(bytes)),
+        (false, dry) if bytes > 0 => println!(
+            "{} the Markdown model ({}); add --models to delete it too",
+            if dry { "would keep" } else { "kept" },
+            fmt_bytes(bytes),
+        ),
+        _ => {}
+    }
 }
 
 /// True iff `meta_path` exists and its JSON has `"tool": "eprint"`.

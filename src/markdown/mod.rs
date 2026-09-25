@@ -72,11 +72,13 @@ impl Job {
         let pages = pdf.pages();
         std::fs::create_dir_all(&self.pages_dir)?;
         let renderer = render::Renderer::new(RENDER_DPI);
+        let cache_path = |i: usize| self.pages_dir.join(format!("{:04}.json", i + 1));
+        let pending = (0..pages.len()).filter(|&i| read_page_cache(&cache_path(i)).is_none()).count();
 
         let mut model: Option<MinerU> = None;
         let mut rendered = Vec::with_capacity(pages.len());
         for (i, page) in pages.iter().enumerate() {
-            let cache_path = self.pages_dir.join(format!("{:04}.json", i + 1));
+            let cache_path = cache_path(i);
             let blocks = match read_page_cache(&cache_path) {
                 Some(blocks) => {
                     debug!(page = i + 1, "page blocks cached");
@@ -84,7 +86,7 @@ impl Job {
                 }
                 None => {
                     if model.is_none() {
-                        model = Some(self.load_model(pages.len())?);
+                        model = Some(self.load_model(pending, pages.len())?);
                     }
                     let model = model.as_ref().expect("loaded above");
                     let start = Instant::now();
@@ -117,7 +119,7 @@ impl Job {
         Ok(markdown)
     }
 
-    fn load_model(&self, pages: usize) -> Result<MinerU> {
+    fn load_model(&self, pending: usize, total: usize) -> Result<MinerU> {
         let device = oar_ocr_vl::utils::parse_device(&self.device)
             .map_err(|e| anyhow!("can't use device {:?} for Markdown conversion: {e}", self.device))?;
         if self.progress {
@@ -126,7 +128,12 @@ impl Job {
             } else {
                 "roughly half a minute per page"
             };
-            eprintln!("Converting {pages} pages to Markdown with MinerU2.5-Pro on {} ({pace}).", self.device);
+            let what = if pending == total {
+                format!("{total} pages")
+            } else {
+                format!("the remaining {pending} of {total} pages")
+            };
+            eprintln!("Converting {what} to Markdown with MinerU2.5-Pro on {} ({pace}).", self.device);
         }
         let start = Instant::now();
         let model = MinerU::from_dir(&self.model_dir, device)

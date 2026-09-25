@@ -4,7 +4,7 @@
 //! pinned by size + SHA-256. Files download on first use into
 //! `<cache_root>/models/<model>/<revision>/`, resuming a partial `.part` file
 //! if a previous download was interrupted. A verified file gets a `.sha256`
-//! sidecar so later runs don't re-hash 2.3 GB.
+//! sidecar so later runs don't re-hash 2.2 GB.
 
 use crate::cli::Context;
 use anyhow::{bail, Context as _, Result};
@@ -63,6 +63,7 @@ pub fn model_dir(cache_root: &Path) -> PathBuf {
 pub async fn ensure(cx: &Context) -> Result<PathBuf> {
     let dir = model_dir(&cx.cfg.cache_root);
     tokio::fs::create_dir_all(&dir).await?;
+    prune_other_revisions(&dir);
     let missing: Vec<&ModelFile> = FILES.iter().filter(|f| !is_verified(&dir, f)).collect();
     if missing.is_empty() {
         return Ok(dir);
@@ -91,6 +92,21 @@ pub async fn ensure(cx: &Context) -> Result<PathBuf> {
             .with_context(|| format!("downloading model file {}", file.name))?;
     }
     Ok(dir)
+}
+
+/// Delete weights for revisions other than the pinned one (left behind when
+/// an upgrade re-pins the model), so they don't silently hold gigabytes.
+fn prune_other_revisions(current: &Path) {
+    let (Some(parent), Some(keep)) = (current.parent(), current.file_name()) else { return };
+    let Ok(entries) = std::fs::read_dir(parent) else { return };
+    for entry in entries.flatten() {
+        if entry.file_name() != keep && entry.path().is_dir() {
+            match std::fs::remove_dir_all(entry.path()) {
+                Ok(()) => info!(dir = %entry.path().display(), "removed stale model revision"),
+                Err(e) => tracing::warn!(dir = %entry.path().display(), error = %e, "could not remove stale model revision"),
+            }
+        }
+    }
 }
 
 fn is_verified(dir: &Path, f: &ModelFile) -> bool {
@@ -198,8 +214,9 @@ async fn download(client: &reqwest::Client, dir: &Path, f: &ModelFile, progress:
     Ok(())
 }
 
+/// Binary gigabytes, matching `eprint cache list`.
 fn gb(bytes: u64) -> f64 {
-    bytes as f64 / 1e9
+    bytes as f64 / (1u64 << 30) as f64
 }
 
 #[cfg(test)]
@@ -210,6 +227,19 @@ mod tests {
     fn model_dir_is_keyed_by_revision() {
         let d = model_dir(Path::new("/c"));
         assert_eq!(d, Path::new("/c/models/MinerU2.5-Pro-2605-1.2B/bff20d4ae2bf"));
+    }
+
+    #[test]
+    fn prunes_only_other_revisions() {
+        let root = tempfile::tempdir().unwrap();
+        let current = model_dir(root.path());
+        let stale = current.with_file_name("0123456789ab");
+        std::fs::create_dir_all(&current).unwrap();
+        std::fs::create_dir_all(&stale).unwrap();
+        std::fs::write(current.join("config.json"), b"{}").unwrap();
+        prune_other_revisions(&current);
+        assert!(!stale.exists());
+        assert!(current.join("config.json").exists());
     }
 
     #[test]
