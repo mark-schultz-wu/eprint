@@ -9,7 +9,7 @@
 
 use crate::cache;
 use crate::cli::{Context, SyncArgs};
-use crate::iacr::oai;
+use crate::iacr::{http, oai};
 use crate::ids::version;
 use anyhow::Result;
 use std::path::Path;
@@ -19,6 +19,10 @@ use tracing::{info, warn};
 
 /// How far back the first sync looks, absent `--since` or a previous sync.
 pub const DEFAULT_WINDOW_DAYS: u32 = 30;
+
+/// After a failed auto-sync (eprint down or rate-limiting), don't try again
+/// for this long, so every command doesn't pay for another failed attempt.
+const FAILURE_BACKOFF: Duration = Duration::hours(1);
 
 #[derive(Debug, serde::Serialize)]
 pub struct SyncReport {
@@ -34,7 +38,7 @@ pub async fn run(cx: &Context, args: SyncArgs) -> Result<()> {
         anyhow::bail!("--offline set; sync requires network");
     }
     let window = Duration::days(args.default_window_days.into());
-    let report = sync_impl(cx, args.since.as_deref(), window).await?;
+    let report = sync_impl(cx, args.since.as_deref(), window, http::Retry::Patient).await?;
     if cx.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -57,8 +61,13 @@ pub async fn maybe_auto_sync(cx: &Context) -> Result<bool> {
         return Ok(false);
     }
     let last = cache::read_last_sync(root).await;
+    let failed = cache::read_last_sync_failure(root).await;
     let now = OffsetDateTime::now_utc();
     if !sync_due(now, last, cx.cfg.sync.stale_after) {
+        return Ok(false);
+    }
+    if backing_off(now, last, failed) {
+        info!(last_failure = ?failed, "auto-sync skipped: backing off after a recent failure");
         return Ok(false);
     }
     if !cx.json {
@@ -71,7 +80,21 @@ pub async fn maybe_auto_sync(cx: &Context) -> Result<bool> {
         }
     }
     info!(last_sync = ?last, "auto-sync starting");
-    let report = sync_impl(cx, None, Duration::days(DEFAULT_WINDOW_DAYS.into())).await?;
+    // Background work: no waiting out rate limits (http::Retry::Quick), and
+    // after a failure, back off rather than retrying on every command.
+    let window = Duration::days(DEFAULT_WINDOW_DAYS.into());
+    let report = match sync_impl(cx, None, window, http::Retry::Quick).await {
+        Ok(report) => report,
+        Err(e) => {
+            if let Err(stamp_err) = cache::write_last_sync_failure(root, now).await {
+                warn!(error = %stamp_err, "could not record the auto-sync failure");
+            }
+            return Err(e.context(format!(
+                "will retry after {} minutes",
+                FAILURE_BACKOFF.whole_minutes()
+            )));
+        }
+    };
     if !cx.json {
         eprintln!(
             "  done ({} records, {} cached papers updated)",
@@ -81,7 +104,12 @@ pub async fn maybe_auto_sync(cx: &Context) -> Result<bool> {
     Ok(true)
 }
 
-async fn sync_impl(cx: &Context, since: Option<&str>, window: Duration) -> Result<SyncReport> {
+async fn sync_impl(
+    cx: &Context,
+    since: Option<&str>,
+    window: Duration,
+    retry: http::Retry,
+) -> Result<SyncReport> {
     let root = &cx.cfg.cache_root;
     tokio::fs::create_dir_all(root).await?;
 
@@ -89,8 +117,9 @@ async fn sync_impl(cx: &Context, since: Option<&str>, window: Duration) -> Resul
     let from = from_date(OffsetDateTime::now_utc(), since, last, window);
     info!(from = %from, "starting OAI-PMH sync");
 
+    let oai_url = cx.site.oai_url();
     let records =
-        oai::list_records(&cx.http, &cx.rate_limiter, &cx.site.oai_url(), Some(&from)).await?;
+        oai::list_records(&cx.http, &cx.rate_limiter, &oai_url, Some(&from), retry).await?;
 
     let updated = apply_records(root, &records).await?;
 
@@ -132,6 +161,16 @@ async fn apply_records(root: &Path, records: &[oai::RecordHeader]) -> Result<usi
 /// than `stale_after`.
 fn sync_due(now: OffsetDateTime, last: Option<OffsetDateTime>, stale_after: Duration) -> bool {
     last.is_none_or(|t| now - t > stale_after)
+}
+
+/// Whether auto-sync should hold off: it failed within [`FAILURE_BACKOFF`],
+/// and hasn't succeeded since.
+fn backing_off(
+    now: OffsetDateTime,
+    last_success: Option<OffsetDateTime>,
+    last_failure: Option<OffsetDateTime>,
+) -> bool {
+    last_failure.is_some_and(|f| last_success < Some(f) && now - f < FAILURE_BACKOFF)
 }
 
 /// The `from` date for `ListRecords`: an explicit `--since`, else the day of
@@ -210,6 +249,19 @@ mod tests {
             Some(NOW - Duration::hours(2)),
             Duration::hours(1)
         ));
+    }
+
+    #[test]
+    fn a_recent_failure_backs_off_until_it_expires_or_a_sync_succeeds() {
+        let ago = |m: i64| Some(NOW - Duration::minutes(m));
+        assert!(!backing_off(NOW, None, None));
+        assert!(backing_off(NOW, None, ago(10)));
+        assert!(backing_off(NOW, ago(24 * 60), ago(59)));
+        assert!(!backing_off(NOW, ago(24 * 60), ago(60)), "backoff expired");
+        assert!(
+            !backing_off(NOW, ago(5), ago(10)),
+            "a later success clears it"
+        );
     }
 
     #[test]

@@ -1,7 +1,9 @@
 //! Metadata files: paper-level and version-level `meta.json`, and the
 //! last-sync stamp.
 
-use super::{last_sync_path, paper_dir, paper_meta_path, version_paths, TOOL_TAG};
+use super::{
+    last_sync_failure_path, last_sync_path, paper_dir, paper_meta_path, version_paths, TOOL_TAG,
+};
 use crate::ids::version::Canonical;
 use crate::ids::PaperId;
 use serde::{Deserialize, Serialize};
@@ -165,13 +167,32 @@ pub async fn write_version_meta(
 /// When `eprint sync` last completed, if it ever has. (The stamp file holds
 /// unix seconds.)
 pub async fn read_last_sync(root: &Path) -> Option<OffsetDateTime> {
-    let s = tokio::fs::read_to_string(last_sync_path(root)).await.ok()?;
-    OffsetDateTime::from_unix_timestamp(s.trim().parse().ok()?).ok()
+    read_stamp(&last_sync_path(root)).await
 }
 
 pub async fn write_last_sync(root: &Path, at: OffsetDateTime) -> io::Result<()> {
-    tokio::fs::create_dir_all(root).await?;
-    tokio::fs::write(last_sync_path(root), at.unix_timestamp().to_string()).await
+    write_stamp(&last_sync_path(root), at).await
+}
+
+/// When an auto-sync last failed, if ever. (Unix seconds on disk.)
+pub async fn read_last_sync_failure(root: &Path) -> Option<OffsetDateTime> {
+    read_stamp(&last_sync_failure_path(root)).await
+}
+
+pub async fn write_last_sync_failure(root: &Path, at: OffsetDateTime) -> io::Result<()> {
+    write_stamp(&last_sync_failure_path(root), at).await
+}
+
+async fn read_stamp(path: &Path) -> Option<OffsetDateTime> {
+    let s = tokio::fs::read_to_string(path).await.ok()?;
+    OffsetDateTime::from_unix_timestamp(s.trim().parse().ok()?).ok()
+}
+
+async fn write_stamp(path: &Path, at: OffsetDateTime) -> io::Result<()> {
+    if let Some(dir) = path.parent() {
+        tokio::fs::create_dir_all(dir).await?;
+    }
+    tokio::fs::write(path, at.unix_timestamp().to_string()).await
 }
 
 fn to_json(value: &impl Serialize) -> io::Result<Vec<u8>> {
@@ -315,6 +336,9 @@ mod tests {
         let at = time::macros::datetime!(2023-11-14 22:13:20 UTC);
         write_last_sync(root.path(), at).await.unwrap();
         assert_eq!(read_last_sync(root.path()).await, Some(at));
+        assert_eq!(read_last_sync_failure(root.path()).await, None);
+        write_last_sync_failure(root.path(), at).await.unwrap();
+        assert_eq!(read_last_sync_failure(root.path()).await, Some(at));
         // The on-disk format is plain unix seconds.
         let raw = std::fs::read_to_string(last_sync_path(root.path())).unwrap();
         assert_eq!(raw, "1700000000");

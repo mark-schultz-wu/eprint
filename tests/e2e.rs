@@ -887,3 +887,62 @@ async fn print_writes_only_the_requested_artifact() {
         stderr(&out)
     );
 }
+
+/// Auto-sync against a rate-limited OAI: the command isn't held up by the
+/// 429 back-off schedule, and the next command doesn't retry (it backs off
+/// for an hour). An explicit `sync` still runs.
+#[tokio::test(flavor = "multi_thread")]
+async fn rate_limited_auto_sync_fails_fast_and_backs_off() {
+    let h = Harness::new().await;
+    h.serve_paper(&[(V1, V1_UNIX, PDF_V1)]).await;
+    assert!(h.run(&["paper", ID], &[]).await.status.success());
+    Mock::given(method("GET"))
+        .and(path("/oai"))
+        .respond_with(ResponseTemplate::new(429))
+        .mount(&h.server)
+        .await;
+    let auto = [("EPRINT_AUTO_SYNC", "true")];
+
+    let started = std::time::Instant::now();
+    let out = h.run(&["paper", ID], &auto).await;
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(10),
+        "no 429 back-off wait: took {:?}",
+        started.elapsed()
+    );
+    assert!(
+        stderr(&out).contains("auto-sync failed"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(
+        stderr(&out).contains("will retry after 60 minutes"),
+        "{}",
+        stderr(&out)
+    );
+    assert_eq!(h.requests_to("/oai").await, 1, "one attempt, no retries");
+
+    let out = h.run(&["paper", ID], &auto).await;
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!stderr(&out).contains("auto-sync"), "{}", stderr(&out));
+    assert_eq!(
+        h.requests_to("/oai").await,
+        1,
+        "backing off: no new attempt"
+    );
+
+    h.server.reset().await;
+    serve_oai(
+        &h,
+        "ListRecords",
+        oai_list_records("2026/001", "2026-01-01T00:00:00Z"),
+    )
+    .await;
+    let out = h.run(&["sync"], &[]).await;
+    assert!(
+        out.status.success(),
+        "explicit sync isn't blocked: {}",
+        stderr(&out)
+    );
+}

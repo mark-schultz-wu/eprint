@@ -3,6 +3,7 @@
 //! ```text
 //! <cache_root>/
 //!   .last_sync_unix_s              # when `eprint sync` last ran
+//!   .last_sync_failure_unix_s      # when an auto-sync last failed (backs off)
 //!   models/                        # Markdown model weights (see crate::markdown::weights)
 //!   2024/
 //!     0463/
@@ -30,8 +31,9 @@ mod meta;
 pub mod scan;
 
 pub use meta::{
-    purge_if_outdated, read_last_sync, read_paper_meta, read_version_meta, write_last_sync,
-    write_paper_meta, write_version_meta, PaperMeta, VersionMeta,
+    purge_if_outdated, read_last_sync, read_last_sync_failure, read_paper_meta, read_version_meta,
+    write_last_sync, write_last_sync_failure, write_paper_meta, write_version_meta, PaperMeta,
+    VersionMeta,
 };
 
 use crate::ids::version::Canonical;
@@ -47,6 +49,7 @@ mod files {
     pub const META: &str = "meta.json";
     pub const MODELS: &str = "models";
     pub const LAST_SYNC: &str = ".last_sync_unix_s";
+    pub const LAST_SYNC_FAILURE: &str = ".last_sync_failure_unix_s";
 }
 
 /// Magic field embedded in every paper-level `meta.json` so destructive
@@ -72,6 +75,10 @@ pub fn models_dir(root: &Path) -> PathBuf {
 
 fn last_sync_path(root: &Path) -> PathBuf {
     root.join(files::LAST_SYNC)
+}
+
+fn last_sync_failure_path(root: &Path) -> PathBuf {
+    root.join(files::LAST_SYNC_FAILURE)
 }
 
 pub struct VersionPaths {

@@ -47,6 +47,7 @@ pub async fn list_records(
     rl: &RateLimiter,
     endpoint: &str,
     from: Option<&str>,
+    retry: http::Retry,
 ) -> Result<Vec<RecordHeader>> {
     let span = info_span!("oai_list_records", from = from.unwrap_or("(beginning)"));
     async {
@@ -54,7 +55,7 @@ pub async fn list_records(
         let mut url = first_url(endpoint, from);
         let mut page_num = 1u32;
         loop {
-            let body = http::get_text(client, rl, &url).await?;
+            let body = http::get_text_with(client, rl, &url, retry).await?;
             let page = parse_page(&body).context("parsing OAI-PMH response")?;
             info!(
                 page = page_num,

@@ -79,23 +79,53 @@ const RETRY_BACKOFFS: [Duration; 3] = [
 /// header can't park us for hours.
 const MAX_RETRY_AFTER: Duration = Duration::from_secs(300);
 
-/// How long to wait before retry number `attempt` (0-based), or `None` once
-/// the budget is spent. A `Retry-After` in delta-seconds form wins over the
-/// fixed schedule (capped at [`MAX_RETRY_AFTER`]); the HTTP-date form is
-/// ignored in favour of the schedule.
-fn retry_delay(attempt: usize, retry_after: Option<&str>) -> Option<Duration> {
-    let fallback = *RETRY_BACKOFFS.get(attempt)?;
+/// How hard to retry a rate-limited (429) request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Retry {
+    /// Wait out the rate limit ([`RETRY_BACKOFFS`], up to ~105 s): for
+    /// things the user asked for.
+    Patient,
+    /// Give up at once: for background work (auto-sync) that mustn't stall
+    /// the command the user actually ran.
+    Quick,
+}
+
+impl Retry {
+    fn schedule(self) -> &'static [Duration] {
+        match self {
+            Retry::Patient => &RETRY_BACKOFFS,
+            Retry::Quick => &[],
+        }
+    }
+}
+
+/// How long to wait before retry number `attempt` (0-based) under `retry`,
+/// or `None` once the budget is spent. A `Retry-After` in delta-seconds form
+/// wins over the fixed schedule (capped at [`MAX_RETRY_AFTER`]); the
+/// HTTP-date form is ignored in favour of the schedule.
+fn retry_delay(retry: Retry, attempt: usize, retry_after: Option<&str>) -> Option<Duration> {
+    let fallback = *retry.schedule().get(attempt)?;
     let server = retry_after
         .and_then(|s| s.trim().parse::<u64>().ok())
         .map(|s| Duration::from_secs(s).min(MAX_RETRY_AFTER));
     Some(server.unwrap_or(fallback))
 }
 
+/// Fetch a URL as bytes with [`Retry::Patient`].
+pub async fn get_bytes(client: &reqwest::Client, rl: &RateLimiter, url: &str) -> Result<Bytes> {
+    get_bytes_with(client, rl, url, Retry::Patient).await
+}
+
 /// Fetch a URL as bytes, blocking until the rate limiter grants a token.
 ///
-/// A 429 is retried on the [`RETRY_BACKOFFS`] schedule (each retry also takes
-/// a fresh rate-limiter token); any other error status fails immediately.
-pub async fn get_bytes(client: &reqwest::Client, rl: &RateLimiter, url: &str) -> Result<Bytes> {
+/// A 429 is retried per `retry` (each retry also takes a fresh rate-limiter
+/// token); any other error status fails immediately.
+pub async fn get_bytes_with(
+    client: &reqwest::Client,
+    rl: &RateLimiter,
+    url: &str,
+    retry: Retry,
+) -> Result<Bytes> {
     let span = info_span!("http_get", %url);
     async {
         for attempt in 0.. {
@@ -111,17 +141,18 @@ pub async fn get_bytes(client: &reqwest::Client, rl: &RateLimiter, url: &str) ->
                     .headers()
                     .get("Retry-After")
                     .and_then(|v| v.to_str().ok());
-                let Some(delay) = retry_delay(attempt, retry_after) else {
+                let budget = retry.schedule().len();
+                let Some(delay) = retry_delay(retry, attempt, retry_after) else {
                     anyhow::bail!(
-                        "eprint.iacr.org kept returning 429 (rate limited) for {url} after {} \
-                         retries; wait a minute and re-run, or raise EPRINT_MIN_INTERVAL_S",
-                        RETRY_BACKOFFS.len(),
+                        "eprint.iacr.org kept returning 429 (rate limited) for {url} after \
+                         {budget} retries; wait a minute and re-run, or raise \
+                         EPRINT_MIN_INTERVAL_S",
                     );
                 };
                 warn!(
                     retry_in_s = delay.as_secs(),
                     retry = attempt + 1,
-                    of = RETRY_BACKOFFS.len(),
+                    of = budget,
                     "eprint.iacr.org rate-limited this request (429); backing off"
                 );
                 tokio::time::sleep(delay).await;
@@ -139,9 +170,19 @@ pub async fn get_bytes(client: &reqwest::Client, rl: &RateLimiter, url: &str) ->
     .await
 }
 
-/// Fetch a URL as a UTF-8 string.
+/// Fetch a URL as a UTF-8 string with [`Retry::Patient`].
 pub async fn get_text(client: &reqwest::Client, rl: &RateLimiter, url: &str) -> Result<String> {
-    let bytes = get_bytes(client, rl, url).await?;
+    get_text_with(client, rl, url, Retry::Patient).await
+}
+
+/// Fetch a URL as a UTF-8 string.
+pub async fn get_text_with(
+    client: &reqwest::Client,
+    rl: &RateLimiter,
+    url: &str,
+    retry: Retry,
+) -> Result<String> {
+    let bytes = get_bytes_with(client, rl, url, retry).await?;
     Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
@@ -155,9 +196,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn quick_never_retries_even_if_the_server_says_when() {
+        assert_eq!(retry_delay(Retry::Quick, 0, None), None);
+        assert_eq!(retry_delay(Retry::Quick, 0, Some("1")), None);
+    }
+
+    #[test]
     fn schedule_without_retry_after_then_gives_up() {
         let got: Vec<_> = (0..=RETRY_BACKOFFS.len())
-            .map(|a| retry_delay(a, None))
+            .map(|a| retry_delay(Retry::Patient, a, None))
             .collect();
         let mut want: Vec<_> = RETRY_BACKOFFS.iter().copied().map(Some).collect();
         want.push(None);
@@ -166,19 +213,34 @@ mod tests {
 
     #[test]
     fn delta_seconds_retry_after_wins_and_is_capped() {
-        assert_eq!(retry_delay(0, Some("7")), Some(Duration::from_secs(7)));
-        assert_eq!(retry_delay(0, Some(" 7 ")), Some(Duration::from_secs(7)));
-        assert_eq!(retry_delay(1, Some("100000")), Some(MAX_RETRY_AFTER));
+        assert_eq!(
+            retry_delay(Retry::Patient, 0, Some("7")),
+            Some(Duration::from_secs(7))
+        );
+        assert_eq!(
+            retry_delay(Retry::Patient, 0, Some(" 7 ")),
+            Some(Duration::from_secs(7))
+        );
+        assert_eq!(
+            retry_delay(Retry::Patient, 1, Some("100000")),
+            Some(MAX_RETRY_AFTER)
+        );
     }
 
     #[test]
     fn unparseable_retry_after_falls_back_to_schedule() {
         let http_date = "Fri, 25 Sep 2026 18:49:47 GMT";
-        assert_eq!(retry_delay(0, Some(http_date)), Some(RETRY_BACKOFFS[0]));
+        assert_eq!(
+            retry_delay(Retry::Patient, 0, Some(http_date)),
+            Some(RETRY_BACKOFFS[0])
+        );
     }
 
     #[test]
     fn retry_after_does_not_extend_the_budget() {
-        assert_eq!(retry_delay(RETRY_BACKOFFS.len(), Some("1")), None);
+        assert_eq!(
+            retry_delay(Retry::Patient, RETRY_BACKOFFS.len(), Some("1")),
+            None
+        );
     }
 }
