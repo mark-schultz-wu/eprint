@@ -35,3 +35,32 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.95
       - uses: Swatinem/rust-cache@v2
       - run: cargo check --all-targets
+
+  mutants:
+    name: mutation testing (changed code)
+    # Only the lines a pull request changes: minutes, not the ~15 a full
+    # run takes. Exclusions with reasons live in .cargo/mutants.toml.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants
+      - run: git diff origin/${{ github.base_ref }}.. > pr.diff
+      - name: cargo mutants --in-diff
+        run: |
+          status=0
+          cargo mutants --no-shuffle -vV --in-place --in-diff pr.diff || status=$?
+          # Exit 3 means the only survivors were timeouts: mutants that make
+          # the code loop forever (e.g. `i += 1` -> `i *= 1`), i.e. caught.
+          [ "$status" -eq 0 ] || [ "$status" -eq 3 ]
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutants.out
+          path: mutants.out
