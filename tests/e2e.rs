@@ -41,13 +41,20 @@ impl Harness {
             .env("EPRINT_CACHE_DIR", self.cache.path())
             .env("EPRINT_AUTO_SYNC", "false")
             .env("EPRINT_MIN_INTERVAL_S", "0.001")
-            .env("NO_COLOR", "1");
+            .env("NO_COLOR", "1")
+            // Tests must never reach the internet (e.g. the real model on
+            // Hugging Face). The fake eprint is plain HTTP on localhost, so
+            // only real HTTPS requests hit this dead proxy, and fail fast.
+            .env("HTTPS_PROXY", "http://127.0.0.1:9");
         for var in [
             "RUST_LOG",
             "HTTP_PROXY",
             "http_proxy",
+            "https_proxy",
             "ALL_PROXY",
             "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
         ] {
             cmd.env_remove(var);
         }
@@ -858,6 +865,19 @@ async fn print_writes_only_the_requested_artifact() {
     let out = h.run(&["--offline", ID, "--print", "md"], &[]).await;
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stdout(&out), "# Converted\n\n$x^2$\n");
+
+    // An unreadable artifact is reported as such, not as "not cached".
+    let bib = h.version_dir(V2).join("paper.bib");
+    std::fs::remove_file(&bib).unwrap();
+    std::fs::create_dir(&bib).unwrap();
+    let out = h.run(&["--offline", ID, "--print", "bib"], &[]).await;
+    assert_eq!(out.status.code(), Some(1));
+    assert!(stderr(&out).contains("reading "), "{}", stderr(&out));
+    assert!(
+        !stderr(&out).contains("no BibTeX entry cached"),
+        "{}",
+        stderr(&out)
+    );
 
     let out = h.run(&["--json", ID, "--print", "bib"], &[]).await;
     assert!(!out.status.success());

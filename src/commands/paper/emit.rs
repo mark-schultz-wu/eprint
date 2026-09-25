@@ -84,25 +84,23 @@ pub async fn print_artifact(
         PrintWhat::Bib => (&paths.bib, "BibTeX entry"),
         PrintWhat::Abstract => (&paths.abstract_, "abstract"),
     };
-    match tokio::fs::read_to_string(path).await {
-        Ok(text) => {
-            print!("{text}");
-            if !text.ends_with('\n') {
-                println!();
-            }
-            Ok(())
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            let why = if what == PrintWhat::Md {
-                ""
-            } else {
-                " (eprint's landing page describes only the current version, so older \
-                 versions have none)"
-            };
-            anyhow::bail!("no {name} cached for {id} version {version}{why}")
-        }
-        Err(e) => Err(e).with_context(|| format!("reading {}", path.display())),
+    if !path.exists() {
+        let why = if what == PrintWhat::Md {
+            ""
+        } else {
+            " (eprint's landing page describes only the current version, so older \
+             versions have none)"
+        };
+        anyhow::bail!("no {name} cached for {id} version {version}{why}");
     }
+    let text = tokio::fs::read_to_string(path)
+        .await
+        .with_context(|| format!("reading {}", path.display()))?;
+    print!("{text}");
+    if !text.ends_with('\n') {
+        println!();
+    }
+    Ok(())
 }
 
 /// One `  label:  value` line, values aligned in a column.

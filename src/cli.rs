@@ -55,11 +55,11 @@ pub fn expand_shorthand(argv: Vec<OsString>) -> Vec<OsString> {
                 .get_subcommands()
                 .any(|c| c.get_name() == s || c.get_all_aliases().any(|a| a == s))
     };
+    // Only long options take values at the top level (a test checks this),
+    // so short flags like `-vv` never consume the next argument.
     let takes_value = |flag: &str| {
         cmd.get_arguments().any(|a| {
-            let named = a.get_long().is_some_and(|l| flag == format!("--{l}"))
-                || a.get_short().is_some_and(|c| flag == format!("-{c}"));
-            named && a.get_action().takes_values()
+            a.get_long().is_some_and(|l| flag == format!("--{l}")) && a.get_action().takes_values()
         })
     };
 
@@ -324,6 +324,19 @@ mod tests {
                 .command,
             Command::Cache(_)
         ));
+    }
+
+    /// `expand_shorthand` assumes no top-level short option takes a value;
+    /// adding one (say `-o <file>`) means teaching it to skip that value.
+    #[test]
+    fn no_top_level_short_option_takes_a_value() {
+        for arg in Cli::command().get_arguments() {
+            assert!(
+                arg.get_short().is_none() || !arg.get_action().takes_values(),
+                "-{} takes a value; update expand_shorthand",
+                arg.get_short().unwrap()
+            );
+        }
     }
 
     #[test]
