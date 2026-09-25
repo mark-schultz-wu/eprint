@@ -70,6 +70,20 @@ eprint.iacr.org rate-limits per IP (HTTP 429 after about 20 rapid requests).
 The CLI paces itself (one request per `EPRINT_MIN_INTERVAL_S`, small bursts)
 and backs off and retries on 429.
 
+## Development
+
+```
+cargo test                  # unit tests + tests/e2e.rs
+cargo fmt --check && cargo clippy --all-targets -- -D warnings
+cargo mutants -j 4          # mutation testing (cargo install cargo-mutants)
+```
+
+`tests/e2e.rs` runs the real binary against a local fake eprint server
+(`wiremock`), pointed there with `EPRINT_BASE_URL`, so the full fetch / version
+/ sync / offline flows are tested without touching eprint.iacr.org. CI
+(`.github/workflows/ci.yml`) runs fmt, clippy, and the tests on Linux and
+macOS, and checks the build on the minimum Rust version.
+
 ## Notes
 
 Personal project by Mark Schultz-Wu. **Not** an officially endorsed
