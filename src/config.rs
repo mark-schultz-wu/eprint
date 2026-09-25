@@ -36,7 +36,8 @@ pub struct Network {
     /// eprint server base URL; see [`crate::iacr::site`].
     pub base_url: String,
     pub contact: Option<String>,
-    pub min_interval_s: f64,
+    /// Minimum spacing between eprint requests (sustained rate).
+    pub min_interval: std::time::Duration,
 }
 
 #[derive(Debug, Clone)]
@@ -55,7 +56,8 @@ impl Config {
                 base_url: env_string("EPRINT_BASE_URL")
                     .unwrap_or_else(|| crate::iacr::site::DEFAULT_BASE_URL.to_owned()),
                 contact: env_string("EPRINT_CONTACT"),
-                min_interval_s: env_f64("EPRINT_MIN_INTERVAL_S").unwrap_or(2.0),
+                min_interval: env_seconds("EPRINT_MIN_INTERVAL_S")
+                    .unwrap_or(std::time::Duration::from_secs(2)),
             },
             md_device: env_string("EPRINT_MD_DEVICE"),
             sync: Sync {
@@ -92,8 +94,11 @@ fn env_parsed<T>(key: &str, parse: impl FnOnce(&str) -> Option<T>) -> Option<T> 
     parsed
 }
 
-fn env_f64(key: &str) -> Option<f64> {
-    env_parsed(key, |s| s.parse().ok())
+/// A non-negative, finite number of seconds (fractions allowed).
+fn env_seconds(key: &str) -> Option<std::time::Duration> {
+    env_parsed(key, |s| {
+        std::time::Duration::try_from_secs_f64(s.parse().ok()?).ok()
+    })
 }
 
 fn env_u32(key: &str) -> Option<u32> {
@@ -120,13 +125,22 @@ mod tests {
     #[test]
     fn numeric_env_values_parse_or_are_ignored() {
         // Test-only variable names, so parallel tests can't interfere.
-        std::env::set_var("EPRINT_TEST_F64", "0.25");
+        std::env::set_var("EPRINT_TEST_SECS", "0.25");
         std::env::set_var("EPRINT_TEST_U32", "48");
         std::env::set_var("EPRINT_TEST_BAD", "lots");
-        assert_eq!(env_f64("EPRINT_TEST_F64"), Some(0.25));
+        assert_eq!(
+            env_seconds("EPRINT_TEST_SECS"),
+            Some(std::time::Duration::from_millis(250))
+        );
         assert_eq!(env_u32("EPRINT_TEST_U32"), Some(48));
         assert_eq!(env_u32("EPRINT_TEST_BAD"), None);
-        assert_eq!(env_f64("EPRINT_TEST_UNSET"), None);
+        assert_eq!(env_seconds("EPRINT_TEST_UNSET"), None);
+        // Values a Duration can't hold are rejected, not a panic.
+        for (i, bad) in ["-1", "inf", "NaN", "1e300"].iter().enumerate() {
+            let key = format!("EPRINT_TEST_BAD_SECS_{i}");
+            std::env::set_var(&key, bad);
+            assert_eq!(env_seconds(&key), None, "{bad}");
+        }
     }
 
     #[test]

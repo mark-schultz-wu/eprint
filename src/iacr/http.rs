@@ -24,10 +24,10 @@ use tracing::{debug, info, info_span, warn, Instrument};
 pub type RateLimiter = Governor<NotKeyed, InMemoryState, DefaultClock>;
 
 /// Build a fresh `Arc<RateLimiter>` for this process's lifetime.
-/// `interval_s` is the sustained period (seconds per request); `burst` is
-/// how many tokens the bucket can hold.
-pub fn rate_limiter(interval_s: f64, burst: u32) -> Arc<RateLimiter> {
-    let period = Duration::from_secs_f64(interval_s.max(0.001));
+/// `interval` is the sustained period per request (clamped to at least
+/// 1 ms); `burst` is how many tokens the bucket can hold.
+pub fn rate_limiter(interval: Duration, burst: u32) -> Arc<RateLimiter> {
+    let period = interval.max(Duration::from_millis(1));
     let quota = Quota::with_period(period)
         .expect("rate-limit period must be > 0")
         .allow_burst(NonZeroU32::new(burst.max(1)).unwrap());
