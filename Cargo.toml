@@ -54,6 +54,8 @@ cuda = ["oar-ocr-vl/cuda"]
 
 [dev-dependencies]
 tempfile = "3"
+# Fake eprint server for the end-to-end tests in tests/.
+wiremock = "0.6"
 
 [[bin]]
 name = "eprint"
