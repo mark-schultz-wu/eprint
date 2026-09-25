@@ -19,8 +19,6 @@ use time::macros::format_description;
 use time::OffsetDateTime;
 use tracing::info;
 
-pub const LAST_SYNC_STAMP: &str = ".last_sync_unix_s";
-
 #[derive(Debug, serde::Serialize)]
 pub struct SyncReport {
     pub from: String,
@@ -51,14 +49,11 @@ pub async fn maybe_auto_sync(cx: &Context) -> Result<bool> {
         return Ok(false);
     }
     let root = &cx.cfg.cache_root;
-    if !cache_has_any_paper(root) {
-        if !cx.json {
-            eprintln!("auto-sync skipped: no papers in cache yet");
-        }
+    if !cache::scan::has_any_paper(root) {
         info!("auto-sync skipped: cache contains no papers");
         return Ok(false);
     }
-    let last = read_last_sync(root).await;
+    let last = cache::read_last_sync(root).await;
     let now = now_unix();
     let threshold_s = (cx.cfg.sync.stale_after_hours as i64) * 3600;
     let needs_sync = match last {
@@ -119,7 +114,7 @@ async fn sync_impl(
     }
 
     let now = now_unix();
-    write_last_sync(root, now).await?;
+    cache::write_last_sync(root, now).await?;
     Ok(SyncReport {
         from,
         records_seen: records.len(),
@@ -128,54 +123,16 @@ async fn sync_impl(
     })
 }
 
-fn cache_has_any_paper(root: &Path) -> bool {
-    let Ok(rd) = std::fs::read_dir(root) else {
-        return false;
-    };
-    for year in rd.flatten() {
-        if !year
-            .file_name()
-            .to_string_lossy()
-            .chars()
-            .all(|c| c.is_ascii_digit())
-        {
-            continue;
-        }
-        let Ok(num_rd) = std::fs::read_dir(year.path()) else {
-            continue;
-        };
-        for paper in num_rd.flatten() {
-            if paper.path().join(cache::files::PAPER_META).exists() {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-async fn read_last_sync(root: &Path) -> Option<i64> {
-    let s = tokio::fs::read_to_string(root.join(LAST_SYNC_STAMP))
-        .await
-        .ok()?;
-    s.trim().parse().ok()
-}
-
 async fn effective_from(root: &Path, explicit: Option<&str>, default_window_days: u32) -> String {
     if let Some(s) = explicit {
         return s.to_owned();
     }
-    if let Some(unix) = read_last_sync(root).await {
+    if let Some(unix) = cache::read_last_sync(root).await {
         return iso_date_from_unix(unix);
     }
     let now = now_unix();
     let back = (default_window_days as i64) * 86_400;
     iso_date_from_unix(now - back)
-}
-
-async fn write_last_sync(root: &Path, unix_s: i64) -> Result<()> {
-    tokio::fs::create_dir_all(root).await?;
-    tokio::fs::write(root.join(LAST_SYNC_STAMP), unix_s.to_string()).await?;
-    Ok(())
 }
 
 fn now_unix() -> i64 {

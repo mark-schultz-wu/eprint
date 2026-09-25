@@ -1,10 +1,11 @@
-//! `eprint cache {path,list,clear}` — local cache management.
+//! `eprint cache {path,list,clear}`: report on and clear the local cache.
 
-use crate::cache;
+use crate::cache::{self, scan};
 use crate::cli::{CacheArgs, CacheCommand, Context};
+use crate::ids::version::Canonical;
+use crate::markdown::weights;
 use anyhow::Result;
 use serde::Serialize;
-use std::path::Path;
 
 pub async fn run(cx: &Context, args: CacheArgs) -> Result<()> {
     match args.command {
@@ -12,241 +13,125 @@ pub async fn run(cx: &Context, args: CacheArgs) -> Result<()> {
             println!("{}", cx.cfg.cache_root.display());
             Ok(())
         }
-        CacheCommand::List => list(cx).await,
-        CacheCommand::Clear { dry_run, models } => clear(cx, dry_run, models).await,
+        CacheCommand::List => list(cx),
+        CacheCommand::Clear { dry_run, models } => clear(cx, dry_run, models),
     }
 }
 
 #[derive(Debug, Serialize)]
-struct CachedPaper {
+struct ListedPaper {
     id: String,
-    current_version: Option<crate::ids::version::Canonical>,
-    versions: Vec<crate::ids::version::Canonical>,
+    current_version: Option<Canonical>,
+    versions: Vec<Canonical>,
     total_bytes: u64,
 }
 
-async fn list(cx: &Context) -> Result<()> {
+fn list(cx: &Context) -> Result<()> {
     let root = &cx.cfg.cache_root;
-    let mut papers = Vec::new();
-    if !root.exists() {
-        if !cx.json {
-            println!("(cache is empty: {})", root.display());
-        } else {
-            println!("[]");
-        }
-        return Ok(());
-    }
-    // Iterate <root>/<year>/<num>/.
-    let mut years: Vec<_> = match std::fs::read_dir(root) {
-        Ok(rd) => rd
-            .flatten()
-            .filter_map(|e| {
-                let n = e.file_name();
-                let s = n.to_str()?;
-                let y: u16 = s.parse().ok()?;
-                Some((y, e.path()))
-            })
-            .collect(),
-        Err(_) => Vec::new(),
-    };
-    years.sort_by_key(|(y, _)| *y);
+    let papers: Vec<ListedPaper> = scan::scan(root)
+        .papers
+        .into_iter()
+        .map(|p| ListedPaper {
+            id: p.id.canonical(),
+            current_version: p.meta.and_then(|m| m.current_version),
+            total_bytes: scan::dir_size(&p.dir),
+            versions: p.versions,
+        })
+        .collect();
 
-    for (year, year_dir) in years {
-        let mut nums: Vec<_> = match std::fs::read_dir(&year_dir) {
-            Ok(rd) => rd
-                .flatten()
-                .filter_map(|e| {
-                    let n = e.file_name();
-                    let s = n.to_str()?;
-                    let num: u32 = s.parse().ok()?;
-                    Some((num, e.path()))
-                })
-                .collect(),
-            Err(_) => continue,
-        };
-        nums.sort_by_key(|(n, _)| *n);
-        for (num, paper_dir) in nums {
-            let id = crate::ids::PaperId { year, num };
-            // Skip directories without one of our paper-meta files —
-            // matches `clear`'s positive-identification policy.
-            let Some(pm) = cache::read_paper_meta(root, id).await else {
-                continue;
-            };
-            let versions = cache::existing_versions(root, id);
-            let total_bytes = dir_size(&paper_dir);
-            papers.push(CachedPaper {
-                id: id.canonical(),
-                current_version: pm.current_version,
-                versions,
-                total_bytes,
-            });
-        }
-    }
-
-    let models_bytes = dir_size(&models_root(root));
     if cx.json {
         println!("{}", serde_json::to_string_pretty(&papers)?);
-    } else if papers.is_empty() {
+        return Ok(());
+    }
+    if papers.is_empty() {
         println!("(no cached papers in {})", root.display());
     } else {
-        println!("{} papers in {}", papers.len(), root.display());
-        let mut total = 0u64;
+        println!("{} in {}", count(papers.len(), "paper"), root.display());
         for p in &papers {
-            let v_str = match (p.current_version.as_ref(), p.versions.len()) {
+            let versions = match (&p.current_version, p.versions.len()) {
                 (Some(cv), 1) => cv.to_string(),
                 (Some(cv), n) => format!("{cv} ({n} cached versions)"),
                 (None, _) => "?".into(),
             };
-            println!("  {}  {:>10}  {}", p.id, fmt_bytes(p.total_bytes), v_str);
-            total += p.total_bytes;
+            println!("  {}  {:>10}  {versions}", p.id, fmt_bytes(p.total_bytes));
         }
+        let total: u64 = papers.iter().map(|p| p.total_bytes).sum();
         println!("  total: {}", fmt_bytes(total));
     }
-    if !cx.json {
-        if models_bytes > 0 {
-            println!(
-                "Markdown model: {} in {}",
-                fmt_bytes(models_bytes),
-                models_root(root).display()
-            );
-        } else {
-            println!("Markdown model: not downloaded (2.2 GB, fetched on first --md)");
-        }
+    let models_dir = cache::models_dir(root);
+    match scan::dir_size(&models_dir) {
+        0 => println!(
+            "Markdown model: not downloaded ({}, fetched on first --md)",
+            fmt_bytes(weights::download_bytes())
+        ),
+        bytes => println!(
+            "Markdown model: {} in {}",
+            fmt_bytes(bytes),
+            models_dir.display()
+        ),
     }
     Ok(())
 }
 
-fn models_root(root: &Path) -> std::path::PathBuf {
-    root.join("models")
-}
-
-async fn clear(cx: &Context, dry_run: bool, models: bool) -> Result<()> {
+fn clear(cx: &Context, dry_run: bool, models: bool) -> Result<()> {
     let root = &cx.cfg.cache_root;
-    if !root.exists() {
-        println!("(cache is empty: {})", root.display());
-        return Ok(());
+    let found = scan::scan(root);
+    let bytes: u64 = found.papers.iter().map(|p| scan::dir_size(&p.dir)).sum();
+    let models_dir = cache::models_dir(root);
+    let model_bytes = scan::dir_size(&models_dir);
+
+    if !dry_run {
+        for paper in &found.papers {
+            scan::remove_paper(paper)?;
+        }
+        if models && model_bytes > 0 {
+            std::fs::remove_dir_all(&models_dir)?;
+        }
     }
 
-    // Identify which year/<num> subtrees actually belong to us, by
-    // checking each paper's meta.json has the right tool tag. Anything
-    // unrecognized is left alone — protects against `EPRINT_CACHE_DIR=$HOME`
-    // accidentally nuking unrelated year-numbered dirs.
-    let mut to_remove: Vec<std::path::PathBuf> = Vec::new();
-    let mut bytes = 0u64;
-    let mut foreign = 0u64;
-    if let Ok(rd) = std::fs::read_dir(root) {
-        for year in rd.flatten() {
-            if !year
-                .file_name()
-                .to_string_lossy()
-                .chars()
-                .all(|c| c.is_ascii_digit())
-            {
-                continue;
-            }
-            let Ok(num_rd) = std::fs::read_dir(year.path()) else {
-                continue;
-            };
-            for paper in num_rd.flatten() {
-                let paper_path = paper.path();
-                if !paper_path.is_dir() {
-                    continue;
-                }
-                let meta_path = paper_path.join(cache::files::PAPER_META);
-                if is_eprint_paper(&meta_path) {
-                    bytes += dir_size(&paper_path);
-                    to_remove.push(paper_path);
-                } else {
-                    foreign += 1;
-                }
-            }
-        }
-    }
-    let papers = to_remove.len() as u64;
-    if dry_run {
-        println!(
-            "would delete {} papers, {} from {}",
-            papers,
-            fmt_bytes(bytes),
-            root.display()
-        );
-        if foreign > 0 {
-            println!(
-                "  ({} directories did NOT have an eprint meta.json and would be left in place)",
-                foreign
-            );
-        }
-        report_models(dir_size(&models_root(root)), models, true);
-        return Ok(());
-    }
-    for p in &to_remove {
-        std::fs::remove_dir_all(p)?;
-        // Try to remove the year-dir if it's now empty; ignore failure.
-        if let Some(parent) = p.parent() {
-            let _ = std::fs::remove_dir(parent);
-        }
-    }
+    let (verb, delete, keep) = if dry_run {
+        ("would delete", "would delete", "would keep")
+    } else {
+        ("deleted", "deleted", "kept")
+    };
     println!(
-        "deleted {} papers, {} from {}",
-        papers,
+        "{verb} {}, {} from {}",
+        count(found.papers.len(), "paper"),
         fmt_bytes(bytes),
         root.display()
     );
-    if foreign > 0 {
-        println!("  ({} unrecognized directories left in place)", foreign);
+    if found.foreign > 0 {
+        println!(
+            "  ({} without an eprint meta.json {} left in place)",
+            count(found.foreign, "numbered directory"),
+            match (dry_run, found.foreign) {
+                (true, _) => "would be",
+                (false, 1) => "was",
+                (false, _) => "were",
+            },
+        );
     }
-    let model_bytes = dir_size(&models_root(root));
-    if models && model_bytes > 0 {
-        std::fs::remove_dir_all(models_root(root))?;
+    // The model is kept unless asked for: it's expensive to re-download.
+    if model_bytes > 0 {
+        if models {
+            println!("{delete} the Markdown model, {}", fmt_bytes(model_bytes));
+        } else {
+            println!(
+                "{keep} the Markdown model ({}); add --models to delete it too",
+                fmt_bytes(model_bytes)
+            );
+        }
     }
-    report_models(model_bytes, models, false);
     Ok(())
 }
 
-/// Say what happened (or would happen) to the model weights, which `clear`
-/// keeps by default because they're expensive to re-download.
-fn report_models(bytes: u64, models: bool, dry_run: bool) {
-    match (models, dry_run) {
-        (true, true) if bytes > 0 => {
-            println!("would delete the Markdown model, {}", fmt_bytes(bytes))
-        }
-        (true, false) if bytes > 0 => println!("deleted the Markdown model, {}", fmt_bytes(bytes)),
-        (false, dry) if bytes > 0 => println!(
-            "{} the Markdown model ({}); add --models to delete it too",
-            if dry { "would keep" } else { "kept" },
-            fmt_bytes(bytes),
-        ),
-        _ => {}
+/// `1 paper`, `2 papers`, `3 numbered directories`.
+fn count(n: usize, noun: &str) -> String {
+    match (n, noun.strip_suffix('y')) {
+        (1, _) => format!("1 {noun}"),
+        (_, Some(stem)) => format!("{n} {stem}ies"),
+        (_, None) => format!("{n} {noun}s"),
     }
-}
-
-/// True iff `meta_path` exists and its JSON has `"tool": "eprint"`.
-fn is_eprint_paper(meta_path: &Path) -> bool {
-    let Ok(s) = std::fs::read_to_string(meta_path) else {
-        return false;
-    };
-    let Ok(v) = serde_json::from_str::<serde_json::Value>(&s) else {
-        return false;
-    };
-    v.get("tool").and_then(|t| t.as_str()) == Some(cache::TOOL_TAG)
-}
-
-fn dir_size(p: &Path) -> u64 {
-    let mut total = 0u64;
-    let mut stack = vec![p.to_path_buf()];
-    while let Some(d) = stack.pop() {
-        if let Ok(rd) = std::fs::read_dir(&d) {
-            for entry in rd.flatten() {
-                let path = entry.path();
-                match entry.metadata() {
-                    Ok(m) if m.is_file() => total += m.len(),
-                    Ok(m) if m.is_dir() => stack.push(path),
-                    _ => {}
-                }
-            }
-        }
-    }
-    total
 }
 
 fn fmt_bytes(n: u64) -> String {
@@ -267,48 +152,19 @@ fn fmt_bytes(n: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
 
     #[test]
-    fn is_eprint_paper_accepts_correct_tag() {
-        let tmp = tempfile_dir();
-        let meta = tmp.path().join("meta.json");
-        fs::write(&meta, r#"{"tool":"eprint","current_version":1}"#).unwrap();
-        assert!(is_eprint_paper(&meta));
+    fn count_pluralizes() {
+        assert_eq!(count(1, "paper"), "1 paper");
+        assert_eq!(count(0, "paper"), "0 papers");
+        assert_eq!(count(1, "numbered directory"), "1 numbered directory");
+        assert_eq!(count(3, "numbered directory"), "3 numbered directories");
     }
 
     #[test]
-    fn is_eprint_paper_rejects_missing_tag() {
-        let tmp = tempfile_dir();
-        let meta = tmp.path().join("meta.json");
-        fs::write(&meta, r#"{"current_version":1}"#).unwrap();
-        assert!(!is_eprint_paper(&meta));
-    }
-
-    #[test]
-    fn is_eprint_paper_rejects_wrong_tag() {
-        let tmp = tempfile_dir();
-        let meta = tmp.path().join("meta.json");
-        fs::write(&meta, r#"{"tool":"someone-else"}"#).unwrap();
-        assert!(!is_eprint_paper(&meta));
-    }
-
-    #[test]
-    fn is_eprint_paper_rejects_missing_file() {
-        let tmp = tempfile_dir();
-        let meta = tmp.path().join("meta.json"); // never written
-        assert!(!is_eprint_paper(&meta));
-    }
-
-    #[test]
-    fn is_eprint_paper_rejects_invalid_json() {
-        let tmp = tempfile_dir();
-        let meta = tmp.path().join("meta.json");
-        fs::write(&meta, "not json").unwrap();
-        assert!(!is_eprint_paper(&meta));
-    }
-
-    fn tempfile_dir() -> tempfile::TempDir {
-        tempfile::tempdir().expect("create tempdir")
+    fn fmt_bytes_uses_binary_units() {
+        assert_eq!(fmt_bytes(512), "512 B");
+        assert_eq!(fmt_bytes(1536), "1.5 KB");
+        assert_eq!(fmt_bytes(2_326_000_000), "2.2 GB");
     }
 }

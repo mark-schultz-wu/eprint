@@ -56,7 +56,14 @@ const FILES: &[ModelFile] = &[
 /// Where the pinned weights live (whether or not they're downloaded yet).
 pub fn model_dir(cache_root: &Path) -> PathBuf {
     let model = REPO.rsplit('/').next().unwrap_or(REPO);
-    cache_root.join("models").join(model).join(&REVISION[..12])
+    crate::cache::models_dir(cache_root)
+        .join(model)
+        .join(&REVISION[..12])
+}
+
+/// Total size of the pinned weight files.
+pub fn download_bytes() -> u64 {
+    FILES.iter().map(|f| f.size).sum()
 }
 
 /// Ensure every weight file is present and verified; returns the model dir.

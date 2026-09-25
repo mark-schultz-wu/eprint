@@ -2,7 +2,7 @@
 //! `PaperMeta.known_versions` / `current_version`. Returns the updated
 //! meta on success; errors propagate (caller can demote to warn).
 
-use crate::cache::{self, PaperMeta, TOOL_TAG};
+use crate::cache::{self, PaperMeta};
 use crate::cli::Context;
 use crate::iacr::archive;
 use crate::iacr::http;
@@ -28,12 +28,7 @@ pub async fn refresh(cx: &Context, id: PaperId, existing: Option<PaperMeta>) -> 
         }
         None => {
             let cv = current.or_else(|| canonical_list.last().cloned());
-            PaperMeta {
-                tool: TOOL_TAG.into(),
-                current_version: cv,
-                known_versions: canonical_list,
-                title: None,
-            }
+            PaperMeta::new(cv, canonical_list)
         }
     };
     cache::write_paper_meta(&cx.cfg.cache_root, id, &new_meta).await?;
