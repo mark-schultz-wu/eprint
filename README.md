@@ -22,7 +22,7 @@ eprint paper 2024/463 --version 20240319T143540Z   # a historical version
 eprint paper 2024/463 --select-version  # pick a version interactively
 eprint sync                             # OAI-PMH refresh of cached papers' versions
 eprint feed [new|updates] --category publickey
-eprint cache {path,list,clear}
+eprint cache {path,list,clear}          # clear keeps the Markdown model; --models drops it
 ```
 
 Global flags: `--offline`, `--json`, `-v`/`-vv`/`-vvv`, `--log-format=json`.
