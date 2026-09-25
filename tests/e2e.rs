@@ -403,24 +403,37 @@ async fn human_output_lists_versions_actions_and_abstract() {
 
     let out = stdout(&h.run(&["paper", ID, "--version", V1], &[]).await);
     assert!(out.starts_with("2024/463\n"), "{out}");
-    assert!(out.contains(&format!("  title: {TITLE}\n")), "{out}");
-    assert!(out.contains(&format!("  current version: {V2}\n")), "{out}");
-    assert!(out.contains(&format!("  resolved to:     {V1}\n")), "{out}");
-    assert!(out.contains("  versions: 2 known, 1 cached\n"), "{out}");
-    assert!(out.contains(&format!("{V2}   (current)\n")), "{out}");
-    assert!(out.contains(&format!("{V1}   (cached)\n")), "{out}");
     assert!(
-        out.contains("  did:             archive-listed, fetched-historical-pdf\n"),
+        out.contains(&format!("  title:            {TITLE}\n")),
         "{out}"
     );
-    assert!(out.contains("  bytes:"), "{out}");
+    assert!(
+        out.contains(&format!("  current version:  {V2}\n")),
+        "{out}"
+    );
+    assert!(
+        out.contains(&format!("  resolved to:      {V1}\n")),
+        "{out}"
+    );
+    assert!(
+        out.contains("  versions:         2 known, 1 cached\n"),
+        "{out}"
+    );
+    assert!(out.contains(&format!("\n    {V2}  (current)\n")), "{out}");
+    assert!(out.contains(&format!("\n    {V1}  (cached)\n")), "{out}");
+    assert!(
+        out.contains("  did:              archive-listed, fetched-historical-pdf\n"),
+        "{out}"
+    );
+    let downloaded = format!("  downloaded:       {} B\n", PDF_V1.len() + LANDING.len());
+    assert!(out.contains(&downloaded), "{out}");
     // The abstract belongs to the current version, which isn't cached yet.
     assert!(!out.contains("Abstract:"), "{out}");
 
     let out = stdout(&h.run(&["paper", ID], &[]).await);
     assert!(!out.contains("resolved to:"), "{out}");
     assert!(
-        out.contains(&format!("{V2}   (current, cached)\n")),
+        out.contains(&format!("\n    {V2}  (current, cached)\n")),
         "{out}"
     );
     assert!(
@@ -434,7 +447,7 @@ async fn human_output_lists_versions_actions_and_abstract() {
         "nothing to do on a cache hit: {quiet}"
     );
     assert!(
-        !quiet.contains("bytes:"),
+        !quiet.contains("downloaded:"),
         "nothing downloaded on a cache hit: {quiet}"
     );
 }

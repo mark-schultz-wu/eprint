@@ -2,6 +2,7 @@
 
 use crate::cache;
 use crate::cli::{Context, PaperArgs};
+use crate::commands::format::fmt_bytes;
 use crate::commands::paper::PaperReport;
 use crate::ids::PaperId;
 use anyhow::Result;
@@ -13,18 +14,18 @@ pub async fn print(cx: &Context, args: &PaperArgs, report: &PaperReport) -> Resu
     }
     println!("{}", report.id);
     if let Some(t) = &report.title {
-        println!("  title: {t}");
+        field("title", t);
     }
     if let Some(v) = &report.current_version {
-        println!("  current version: {v}");
+        field("current version", v);
     }
     if Some(&report.resolved_version) != report.current_version.as_ref() {
-        println!("  resolved to:     {}", report.resolved_version);
+        field("resolved to", report.resolved_version);
     }
     if !report.known_versions.is_empty() {
         let total = report.known_versions.len();
         let cached = report.cached_versions.len();
-        println!("  versions: {total} known, {cached} cached");
+        field("versions", format!("{total} known, {cached} cached"));
         for v in report.known_versions.iter().rev() {
             let mut tags = Vec::new();
             if Some(v) == report.current_version.as_ref() {
@@ -33,22 +34,21 @@ pub async fn print(cx: &Context, args: &PaperArgs, report: &PaperReport) -> Resu
             if report.cached_versions.contains(v) {
                 tags.push("cached");
             }
-            let tag_str = if tags.is_empty() {
-                String::new()
+            if tags.is_empty() {
+                println!("    {v}");
             } else {
-                format!("   ({})", tags.join(", "))
-            };
-            println!("{v}{tag_str}");
+                println!("    {v}  ({})", tags.join(", "));
+            }
         }
     }
     if let Some(c) = &report.md_converter {
-        println!("  markdown:        {}/paper.md ({c})", report.directory);
+        field("markdown", format!("{}/paper.md ({c})", report.directory));
     }
     if !report.actions.is_empty() {
-        println!("  did:             {}", report.actions.join(", "));
+        field("did", report.actions.join(", "));
     }
     if report.bytes_downloaded > 0 {
-        println!("  bytes:           {}", report.bytes_downloaded);
+        field("downloaded", fmt_bytes(report.bytes_downloaded));
     }
     if !args.no_abstract {
         let id: PaperId = args.id.parse()?;
@@ -63,4 +63,9 @@ pub async fn print(cx: &Context, args: &PaperArgs, report: &PaperReport) -> Resu
         }
     }
     Ok(())
+}
+
+/// One `  label:  value` line, values aligned in a column.
+fn field(label: &str, value: impl std::fmt::Display) {
+    println!("  {:<18}{value}", format!("{label}:"));
 }
