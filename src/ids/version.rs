@@ -120,17 +120,6 @@ impl FromStr for OaiDatestamp {
     }
 }
 
-impl fmt::Display for OaiDatestamp {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(
-            &self
-                .0
-                .format(&Rfc3339)
-                .expect("format infallible for RFC3339"),
-        )
-    }
-}
-
 impl From<&OaiDatestamp> for Canonical {
     fn from(src: &OaiDatestamp) -> Canonical {
         // Same instant in time; only the wire format differs.
@@ -150,17 +139,6 @@ impl FromStr for ArchiveCompact {
             .assume_utc();
         check_year(dt)?;
         Ok(ArchiveCompact(dt))
-    }
-}
-
-impl fmt::Display for ArchiveCompact {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(
-            &self
-                .0
-                .format(COMPACT_FMT)
-                .expect("format infallible for compact"),
-        )
     }
 }
 

@@ -103,6 +103,14 @@ mod tests {
                 year: 2020,
                 num: 18
             }
+            .to_string(),
+            "2020/018"
+        );
+        assert_eq!(
+            PaperId {
+                year: 2020,
+                num: 18
+            }
             .canonical(),
             "2020/018"
         );

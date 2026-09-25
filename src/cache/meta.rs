@@ -197,6 +197,7 @@ mod tests {
     #[test]
     fn listing_is_needed_until_versions_are_known() {
         assert!(PaperMeta::new(None, vec![]).needs_listing());
+        assert!(PaperMeta::new(None, vec![v("20240319T143540Z")]).needs_listing());
         let mut m = PaperMeta::new(None, vec![]);
         m.record_listing(vec![v("20240319T143540Z"), v("20241017T150428Z")], None);
         assert_eq!(

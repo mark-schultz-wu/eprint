@@ -90,6 +90,10 @@ mod tests {
     fn default_filter_carries_verbosity() {
         let s = format!("{}", build_log_filter(0, None));
         assert!(s.contains("eprint=warn"));
+        for (v, level) in [(1, "info"), (2, "debug"), (3, "trace"), (9, "trace")] {
+            let s = format!("{}", build_log_filter(v, None));
+            assert!(s.contains(&format!("eprint={level}")), "-v x{v}: {s}");
+        }
     }
 
     #[test]

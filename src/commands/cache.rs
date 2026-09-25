@@ -166,5 +166,6 @@ mod tests {
         assert_eq!(fmt_bytes(512), "512 B");
         assert_eq!(fmt_bytes(1536), "1.5 KB");
         assert_eq!(fmt_bytes(2_326_000_000), "2.2 GB");
+        assert_eq!(fmt_bytes(1 << 50), "1048576.0 GB", "GB is the largest unit");
     }
 }

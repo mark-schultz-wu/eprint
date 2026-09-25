@@ -149,4 +149,36 @@ mod tests {
         );
         assert_eq!(items[1].authors, vec!["Carol"]);
     }
+
+    /// pubDate, CDATA descriptions, multiple authors, and text in elements
+    /// we don't read (guid) not leaking into the previous field.
+    #[test]
+    fn parses_all_fields_and_respects_element_boundaries() {
+        let xml = r##"<rss><channel><title>Cryptology ePrint Archive</title><item>
+          <title>A Paper</title>
+          <guid>https://eprint.iacr.org/2026/100</guid>
+          <link>https://eprint.iacr.org/2026/100</link>
+          <description><![CDATA[Abstract with <b>markup</b>.]]></description>
+          <dc:creator>Alice</dc:creator><dc:creator>Bob</dc:creator>
+          <category>Public-key cryptography</category>
+          <pubDate>Thu, 24 Sep 2026 10:00:00 +0000</pubDate>
+        </item></channel></rss>"##;
+        let items = parse_rss(xml).unwrap();
+        assert_eq!(items.len(), 1);
+        let it = &items[0];
+        assert_eq!(it.title, "A Paper");
+        assert_eq!(it.link, "https://eprint.iacr.org/2026/100");
+        assert_eq!(it.description, "Abstract with <b>markup</b>.");
+        assert_eq!(it.authors, ["Alice", "Bob"]);
+        assert_eq!(it.category.as_deref(), Some("Public-key cryptography"));
+        assert_eq!(
+            it.pub_date.as_deref(),
+            Some("Thu, 24 Sep 2026 10:00:00 +0000")
+        );
+    }
+
+    #[test]
+    fn malformed_xml_is_an_error() {
+        assert!(parse_rss("<rss><channel><item></channel></rss>").is_err());
+    }
 }

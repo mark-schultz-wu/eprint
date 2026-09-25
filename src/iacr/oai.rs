@@ -238,6 +238,9 @@ pub fn parse_page(xml: &str) -> Result<PageResult> {
                         current_id = None;
                         current_datestamp = None;
                     }
+                    // Records also carry <identifier>/<datestamp> outside the
+                    // header (dc:identifier, provenance in <about>); only the
+                    // header's describe the record.
                     "identifier" if in_header => current_field = Some(HeaderField::Identifier),
                     "datestamp" if in_header => current_field = Some(HeaderField::Datestamp),
                     "resumptionToken" => current_field = Some(HeaderField::ResumptionToken),
@@ -274,12 +277,13 @@ pub fn parse_page(xml: &str) -> Result<PageResult> {
             Ok(Event::Text(t)) => {
                 let text = t.unescape().unwrap_or_default().into_owned();
                 match current_field {
-                    Some(HeaderField::Identifier) if in_header => {
+                    // Only ever set inside <header> (see the Start arm).
+                    Some(HeaderField::Identifier) => {
                         if let Some(id) = parse_oai_identifier(&text) {
                             current_id = Some(id);
                         }
                     }
-                    Some(HeaderField::Datestamp) if in_header => {
+                    Some(HeaderField::Datestamp) => {
                         current_datestamp = Some(text);
                     }
                     Some(HeaderField::ResumptionToken) => {
@@ -452,6 +456,95 @@ mod tests {
                 year: 2024,
                 num: 463
             })
+        );
+        assert!(parse_oai_identifier("oai:eprint.iacr.org:2024/463x").is_none());
+    }
+
+    /// A realistic record: the header is followed by a <setSpec>, the
+    /// metadata has its own dc:identifier, and an <about> provenance block
+    /// carries a second <datestamp>. Only the header's values count.
+    #[test]
+    fn only_header_identifier_and_datestamp_count() {
+        let xml = r##"<OAI-PMH><ListRecords><record>
+          <header>
+            <identifier>oai:eprint.iacr.org:2024/463</identifier>
+            <datestamp>2025-01-06T17:43:48Z</datestamp>
+            <setSpec>eprint</setSpec>
+          </header>
+          <metadata><dc><identifier>oai:eprint.iacr.org:1999/001</identifier></dc></metadata>
+          <about><provenance><originDescription>
+            <identifier>oai:eprint.iacr.org:1999/002</identifier>
+            <datestamp>1999-01-01T00:00:00Z</datestamp>
+          </originDescription></provenance></about>
+        </record></ListRecords></OAI-PMH>"##;
+        let p = parse_page(xml).unwrap();
+        assert_eq!(
+            p.records,
+            vec![RecordHeader {
+                id: PaperId {
+                    year: 2024,
+                    num: 463
+                },
+                datestamp: "2025-01-06T17:43:48Z".into(),
+            }]
+        );
+    }
+
+    #[test]
+    fn page_errors_as_start_elements() {
+        let no_match = r##"<OAI-PMH><error code="noRecordsMatch">none</error></OAI-PMH>"##;
+        assert!(parse_page(no_match).unwrap().no_records_match);
+        let bad = r##"<OAI-PMH><error code="badResumptionToken">expired</error></OAI-PMH>"##;
+        assert!(parse_page(bad)
+            .unwrap_err()
+            .to_string()
+            .contains("badResumptionToken"));
+        let bad_empty = r##"<OAI-PMH><error code="badArgument"/></OAI-PMH>"##;
+        assert!(parse_page(bad_empty).is_err());
+    }
+
+    #[test]
+    fn malformed_xml_is_an_error() {
+        assert!(parse_page("<OAI-PMH><ListRecords></OAI-PMH>").is_err());
+        assert!(parse_record("<OAI-PMH><GetRecord></OAI-PMH>").is_err());
+    }
+
+    #[test]
+    fn get_record_self_closing_error() {
+        let xml = r##"<OAI-PMH><error code="idDoesNotExist"/></OAI-PMH>"##;
+        assert!(parse_record(xml).unwrap().is_none());
+        let bad = r##"<OAI-PMH><error code="badArgument"/></OAI-PMH>"##;
+        assert!(parse_record(bad).is_err());
+    }
+
+    /// First title/description win; an empty element doesn't swallow the
+    /// next element's text; the header datestamp beats provenance ones.
+    #[test]
+    fn get_record_field_boundaries() {
+        let xml = r##"<OAI-PMH><GetRecord><record>
+          <header><identifier>oai:eprint.iacr.org:2023/525</identifier>
+            <datestamp>2023-04-11T20:49:58Z</datestamp></header>
+          <metadata><dc>
+            <title></title><creator>Alice</creator>
+            <description>First abstract.</description><description>Second.</description>
+          </dc></metadata>
+          <about><provenance><datestamp>1999-01-01T00:00:00Z</datestamp></provenance></about>
+        </record></GetRecord></OAI-PMH>"##;
+        let r = parse_record(xml).unwrap().unwrap();
+        assert_eq!(r.datestamp, "2023-04-11T20:49:58Z");
+        assert_eq!(r.title, None);
+        assert_eq!(r.abstract_.as_deref(), Some("First abstract."));
+    }
+
+    #[test]
+    fn titles_first_one_wins() {
+        let xml = r##"<OAI-PMH><GetRecord><record><header>
+          <datestamp>2023-04-11T20:49:58Z</datestamp></header>
+          <metadata><dc><title>Main</title><title>Alternative</title></dc></metadata>
+        </record></GetRecord></OAI-PMH>"##;
+        assert_eq!(
+            parse_record(xml).unwrap().unwrap().title.as_deref(),
+            Some("Main")
         );
     }
 }

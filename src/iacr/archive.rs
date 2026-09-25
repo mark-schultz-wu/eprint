@@ -83,7 +83,7 @@ pub fn parse_archive_page(html: &str) -> Result<Vec<ArchiveVersion>, ParseError>
 }
 
 fn looks_like_versions_page(html: &str) -> bool {
-    html.contains("Versions for ePrint paper") || html.contains("Versions for ePrint")
+    html.contains("Versions for ePrint")
 }
 
 #[cfg(test)]

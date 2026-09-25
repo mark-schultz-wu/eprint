@@ -115,6 +115,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn numeric_env_values_parse_or_are_ignored() {
+        // Test-only variable names, so parallel tests can't interfere.
+        std::env::set_var("EPRINT_TEST_F64", "0.25");
+        std::env::set_var("EPRINT_TEST_U32", "48");
+        std::env::set_var("EPRINT_TEST_BAD", "lots");
+        assert_eq!(env_f64("EPRINT_TEST_F64"), Some(0.25));
+        assert_eq!(env_u32("EPRINT_TEST_U32"), Some(48));
+        assert_eq!(env_u32("EPRINT_TEST_BAD"), None);
+        assert_eq!(env_f64("EPRINT_TEST_UNSET"), None);
+    }
+
+    #[test]
     fn parse_bool_accepts_common_spellings() {
         for s in ["1", "true", "YES", "on", "y"] {
             assert_eq!(parse_bool(s), Some(true), "{s}");

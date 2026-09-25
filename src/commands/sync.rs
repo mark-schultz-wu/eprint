@@ -53,12 +53,7 @@ pub async fn maybe_auto_sync(cx: &Context) -> Result<bool> {
     }
     let last = cache::read_last_sync(root).await;
     let now = now_unix();
-    let threshold_s = (cx.cfg.sync.stale_after_hours as i64) * 3600;
-    let needs_sync = match last {
-        Some(t) => (now - t) > threshold_s,
-        None => true,
-    };
-    if !needs_sync {
+    if !sync_due(now, last, cx.cfg.sync.stale_after_hours) {
         return Ok(false);
     }
     if !cx.json {
@@ -70,7 +65,7 @@ pub async fn maybe_auto_sync(cx: &Context) -> Result<bool> {
             None => eprintln!("auto-syncing eprint metadata (first sync)..."),
         }
     }
-    info!(last_sync = ?last, threshold_s, "auto-sync starting");
+    info!(last_sync = ?last, "auto-sync starting");
     let report = sync_impl(cx, None, 30).await?;
     if !cx.json {
         eprintln!(
@@ -132,15 +127,24 @@ async fn apply_records(root: &Path, records: &[oai::RecordHeader]) -> Result<usi
 }
 
 async fn effective_from(root: &Path, explicit: Option<&str>, default_window_days: u32) -> String {
-    if let Some(s) = explicit {
-        return s.to_owned();
+    let last = cache::read_last_sync(root).await;
+    from_date(now_unix(), explicit, last, default_window_days)
+}
+
+/// Whether an auto-sync is due: never synced, or the last sync is older
+/// than `stale_after_hours`.
+fn sync_due(now: i64, last: Option<i64>, stale_after_hours: u32) -> bool {
+    last.is_none_or(|t| now - t > i64::from(stale_after_hours) * 3600)
+}
+
+/// The `from` date for `ListRecords`: an explicit `--since`, else the day of
+/// the last sync, else `window_days` before now.
+fn from_date(now: i64, explicit: Option<&str>, last: Option<i64>, window_days: u32) -> String {
+    match (explicit, last) {
+        (Some(s), _) => s.to_owned(),
+        (None, Some(t)) => iso_date_from_unix(t),
+        (None, None) => iso_date_from_unix(now - i64::from(window_days) * 86_400),
     }
-    if let Some(unix) = cache::read_last_sync(root).await {
-        return iso_date_from_unix(unix);
-    }
-    let now = now_unix();
-    let back = (default_window_days as i64) * 86_400;
-    iso_date_from_unix(now - back)
 }
 
 fn now_unix() -> i64 {
@@ -193,6 +197,31 @@ mod tests {
         assert!(m.needs_listing());
         // Re-applying the same records changes nothing.
         assert_eq!(apply_records(root.path(), &records).await.unwrap(), 0);
+    }
+
+    const NOW: i64 = 1_779_321_600; // 2026-05-21T00:00:00Z
+
+    #[test]
+    fn sync_is_due_when_never_run_or_older_than_the_threshold() {
+        assert!(sync_due(NOW, None, 24));
+        assert!(!sync_due(NOW, Some(NOW - 3600), 24));
+        assert!(
+            !sync_due(NOW, Some(NOW - 24 * 3600), 24),
+            "exactly at the threshold"
+        );
+        assert!(sync_due(NOW, Some(NOW - 24 * 3600 - 1), 24));
+        assert!(sync_due(NOW, Some(NOW - 2 * 3600), 1));
+    }
+
+    #[test]
+    fn from_date_prefers_explicit_then_last_sync_then_window() {
+        assert_eq!(
+            from_date(NOW, Some("2020-01-01"), Some(0), 30),
+            "2020-01-01"
+        );
+        assert_eq!(from_date(NOW, None, Some(NOW - 86_400), 30), "2026-05-20");
+        assert_eq!(from_date(NOW, None, None, 30), "2026-04-21");
+        assert_eq!(from_date(NOW, None, None, 1), "2026-05-20");
     }
 
     #[test]

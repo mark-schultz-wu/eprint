@@ -205,6 +205,19 @@ mod tests {
         assert!(matches!(err, ParseError::NoTitleOnPaperPage));
     }
 
+    #[test]
+    fn each_landing_marker_alone_identifies_a_paper_page() {
+        for marker in [
+            r#"<div class="author">A</div>"#,
+            "<dt>Category</dt>",
+            "<dt>Publication info</dt>",
+            "<dt>History</dt>",
+        ] {
+            let html = format!("<html><h2>renamed heading</h2>{marker}</html>");
+            assert!(parse(&html).is_err(), "{marker}");
+        }
+    }
+
     /// A truly unrelated page (no landing-page markers) returns an empty
     /// landing, not an error — we don't want to error on every random
     /// HTML response.
