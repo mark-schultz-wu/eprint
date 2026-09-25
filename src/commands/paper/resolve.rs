@@ -5,8 +5,8 @@
 
 use crate::cache::{self, PaperMeta};
 use crate::cli::{Context, PaperArgs};
-use crate::id::PaperId;
-use crate::version::Canonical;
+use crate::ids::PaperId;
+use crate::ids::version::Canonical;
 use anyhow::{Context as _, Result};
 
 pub async fn target_version(

@@ -60,7 +60,7 @@ pub struct Context {
     /// Shared token-bucket rate limiter for all outbound HTTP. Built
     /// once in `main` from `cfg.network` (interval) and a small burst
     /// budget, then handed off so all callers serialize through it.
-    pub rate_limiter: std::sync::Arc<crate::net::RateLimiter>,
+    pub rate_limiter: std::sync::Arc<crate::iacr::http::RateLimiter>,
 }
 
 #[derive(Debug, Args)]

@@ -10,8 +10,8 @@
 //! `<resumptionToken>` and `<error code="...">` for pagination + error
 //! handling respectively.
 
-use crate::id::PaperId;
-use crate::net::{self, RateLimiter};
+use crate::ids::PaperId;
+use crate::iacr::http::{self, RateLimiter};
 use anyhow::{Context as _, Result};
 use quick_xml::events::Event;
 use quick_xml::Reader;
@@ -26,7 +26,7 @@ pub const BASE_URL: &str = "https://eprint.iacr.org/oai";
 pub struct RecordHeader {
     pub id: PaperId,
     /// ISO 8601 extended timestamp `YYYY-MM-DDThh:mm:ssZ`. Convert to
-    /// canonical via `crate::version::from_oai` before comparing/storing.
+    /// canonical via `crate::ids::version::from_oai` before comparing/storing.
     pub datestamp: String,
 }
 
@@ -55,7 +55,7 @@ pub async fn list_records(
         let mut url = first_url(from);
         let mut page_num = 1u32;
         loop {
-            let body = net::get_text(client, rl, &url).await?;
+            let body = http::get_text(client, rl, &url).await?;
             let page = parse_page(&body).context("parsing OAI-PMH response")?;
             info!(
                 page = page_num,
@@ -132,7 +132,7 @@ pub async fn get_record(
         "{BASE_URL}?verb=GetRecord&identifier={}&metadataPrefix=oai_dc",
         id.oai_identifier()
     );
-    let body = net::get_text(client, rl, &url).await?;
+    let body = http::get_text(client, rl, &url).await?;
     parse_record(&body).context("parsing OAI-PMH GetRecord response")
 }
 

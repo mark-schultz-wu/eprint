@@ -3,7 +3,7 @@
 use crate::cache;
 use crate::cli::{Context, PaperArgs};
 use crate::commands::paper::PaperReport;
-use crate::id::PaperId;
+use crate::ids::PaperId;
 use anyhow::Result;
 
 pub async fn print(cx: &Context, args: &PaperArgs, report: &PaperReport) -> Result<()> {

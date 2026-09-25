@@ -12,13 +12,15 @@
 //! OAI-PMH) is a separate concern handled by the caller; sources only produce
 //! PDF bytes.
 
+mod eprint_http;
+
 use crate::cli::Context;
-use crate::id::PaperId;
-use crate::net;
-use crate::version::Canonical;
+use crate::iacr::http;
+use crate::ids::version::Canonical;
+use crate::ids::PaperId;
 use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::Arc;
+use eprint_http::EprintHttpSource;
 use tracing::{info, warn};
 
 /// What the caller wants: a specific version of a paper's PDF.
@@ -48,37 +50,10 @@ pub trait PdfSource: Send + Sync {
     async fn fetch(&self, req: &PdfRequest<'_>) -> Result<Option<Vec<u8>>>;
 }
 
-/// Direct fetch from eprint.iacr.org: `/<year>/<num>.pdf` for the current
-/// version, `/archive/<year>/<num>/<unix-seconds>.pdf` for historical ones.
-/// The host rate-limits per IP; `net::get_bytes` backs off and retries on 429.
-pub struct EprintHttpSource {
-    client: reqwest::Client,
-    rl: Arc<net::RateLimiter>,
-}
-
-#[async_trait]
-impl PdfSource for EprintHttpSource {
-    fn name(&self) -> &'static str {
-        "eprint-http"
-    }
-    fn is_network(&self) -> bool {
-        true
-    }
-    async fn fetch(&self, req: &PdfRequest<'_>) -> Result<Option<Vec<u8>>> {
-        let url = if req.is_current {
-            req.id.pdf_url()
-        } else {
-            req.id.historical_pdf_url(req.version)
-        };
-        let bytes = net::get_bytes(&self.client, &self.rl, &url).await?;
-        Ok(Some(bytes.to_vec()))
-    }
-}
-
 // FUTURE: `S3RequesterPaysSource`.
 //
-// A requester-pays S3 bucket is planned. It will plug in here as another
-// `PdfSource` (`is_network() == true`), inserted in `build_sources` *ahead* of
+// A requester-pays S3 bucket is planned. It will be another `PdfSource` in
+// its own module (`is_network() == true`), inserted in `build_sources` *ahead* of
 // `EprintHttpSource`. Open question that shapes its `fetch`: whether the bucket
 // is keyed by arbitrary version ids or only carries the current PDF. If
 // current-only, it returns `Ok(None)` for `!req.is_current`; if it supports
@@ -89,8 +64,8 @@ impl PdfSource for EprintHttpSource {
 pub fn build_sources(cx: &Context) -> Vec<Box<dyn PdfSource>> {
     let mut sources: Vec<Box<dyn PdfSource>> = Vec::new();
     // S3RequesterPaysSource will be inserted here.
-    match net::client(cx.cfg.network.contact.as_deref()) {
-        Ok(client) => sources.push(Box::new(EprintHttpSource { client, rl: cx.rate_limiter.clone() })),
+    match http::client(cx.cfg.network.contact.as_deref()) {
+        Ok(client) => sources.push(Box::new(EprintHttpSource::new(client, cx.rate_limiter.clone()))),
         Err(e) => warn!(error = %e, "skipping eprint-http source: could not build HTTP client"),
     }
     sources

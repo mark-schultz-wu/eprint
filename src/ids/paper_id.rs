@@ -24,7 +24,7 @@ impl PaperId {
 
     /// URL for a specific historical version's PDF, using eprint's
     /// `/archive/<year>/<num>/<unix-seconds>.pdf` form.
-    pub fn historical_pdf_url(&self, version: &crate::version::Canonical) -> String {
+    pub fn historical_pdf_url(&self, version: &crate::ids::version::Canonical) -> String {
         format!("https://eprint.iacr.org/archive/{}/{}.pdf", self.canonical(), version.to_unix())
     }
 
@@ -116,7 +116,7 @@ mod tests {
         assert_eq!(id.pdf_url(), "https://eprint.iacr.org/2020/018.pdf");
         assert_eq!(id.html_url(), "https://eprint.iacr.org/2020/018");
         assert_eq!(id.archive_url(), "https://eprint.iacr.org/archive/versions/2020/018");
-        let v: crate::version::Canonical = "20200110T000000Z".parse().unwrap();
+        let v: crate::ids::version::Canonical = "20200110T000000Z".parse().unwrap();
         assert_eq!(id.historical_pdf_url(&v), "https://eprint.iacr.org/archive/2020/018/1578614400.pdf");
         assert_eq!(PaperId { year: 2024, num: 1234 }.pdf_url(), "https://eprint.iacr.org/2024/1234.pdf");
     }

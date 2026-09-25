@@ -2,8 +2,8 @@
 //! Read-only browse; doesn't touch the cache.
 
 use crate::cli::{Context, FeedArgs, FeedView};
-use crate::feed::{self, Item};
-use crate::net;
+use crate::iacr::rss::{self, Item};
+use crate::iacr::http;
 use anyhow::Result;
 
 pub async fn run(cx: &Context, args: FeedArgs) -> Result<()> {
@@ -11,9 +11,9 @@ pub async fn run(cx: &Context, args: FeedArgs) -> Result<()> {
         anyhow::bail!("--offline set; feed requires network");
     }
     let url = build_url(&args);
-    let client = net::client(cx.cfg.network.contact.as_deref())?;
-    let body = net::get_text(&client, &cx.rate_limiter, &url).await?;
-    let items = feed::parse_rss(&body).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let client = http::client(cx.cfg.network.contact.as_deref())?;
+    let body = http::get_text(&client, &cx.rate_limiter, &url).await?;
+    let items = rss::parse_rss(&body).map_err(|e| anyhow::anyhow!("{e}"))?;
     let shown: Vec<&Item> = items.iter().take(args.limit).collect();
     if cx.json {
         let payload: Vec<_> = shown
@@ -58,8 +58,8 @@ fn build_url(args: &FeedArgs) -> String {
         params.push(format!("category={}", c.as_query()));
     }
     if params.is_empty() {
-        feed::RSS_URL.into()
+        rss::RSS_URL.into()
     } else {
-        format!("{}?{}", feed::RSS_URL, params.join("&"))
+        format!("{}?{}", rss::RSS_URL, params.join("&"))
     }
 }

@@ -7,9 +7,9 @@
 use crate::cache;
 use crate::cli::Context;
 use crate::commands::paper::ReportBuilder;
-use crate::id::PaperId;
+use crate::ids::PaperId;
 use crate::markdown;
-use crate::version::Canonical;
+use crate::ids::version::Canonical;
 use anyhow::Result;
 use tracing::info;
 

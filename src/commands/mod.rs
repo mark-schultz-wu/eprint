@@ -1,6 +1,6 @@
 //! Subcommand handlers.
 
-pub mod cache_cmd;
+pub mod cache;
 pub mod feed;
 pub mod paper;
 pub mod sync;

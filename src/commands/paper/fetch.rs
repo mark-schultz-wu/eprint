@@ -1,17 +1,17 @@
 //! Ensure a specific version of a paper's PDF is in the cache.
 //!
 //! PDF bytes are acquired through the pluggable source list in
-//! [`crate::source`] (eprint over HTTP; S3 later). Metadata
+//! [`crate::sources`] (eprint over HTTP; S3 later). Metadata
 //! (title/bib/abstract) is scraped from the landing page best-effort, and
 //! per-version + paper-level meta are updated on success.
 
 use crate::cache::{self, PaperMeta, VersionMeta};
 use crate::cli::Context;
-use crate::id::PaperId;
-use crate::net;
-use crate::scrape;
-use crate::source;
-use crate::version::Canonical;
+use crate::ids::PaperId;
+use crate::iacr::http;
+use crate::iacr::landing;
+use crate::sources;
+use crate::ids::version::Canonical;
 use crate::commands::paper::ReportBuilder;
 use anyhow::Result;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -46,9 +46,9 @@ pub async fn ensure_version(
     );
 
     // Pull the bytes from the first source that has them.
-    let acquired = source::acquire(cx, &source::PdfRequest { id, version, is_current }).await?;
+    let acquired = sources::acquire(cx, &sources::PdfRequest { id, version, is_current }).await?;
     anyhow::ensure!(
-        net::looks_like_pdf(&acquired.bytes),
+        http::looks_like_pdf(&acquired.bytes),
         "{} bytes for {} version {} (source: {}) don't look like a PDF (missing %PDF header)",
         acquired.bytes.len(),
         id,
@@ -77,19 +77,19 @@ pub async fn ensure_version(
         .is_some();
     let need_landing = (is_current || !have_title) && !cx.offline;
     if need_landing {
-        let client = net::client(cx.cfg.network.contact.as_deref())?;
+        let client = http::client(cx.cfg.network.contact.as_deref())?;
         let rl = &*cx.rate_limiter;
-        let landing = match net::get_text(&client, rl, &id.html_url()).await {
+        let landing = match http::get_text(&client, rl, &id.html_url()).await {
             Ok(html) => {
                 report.add_downloaded(html.len() as u64);
-                scrape::parse(&html).unwrap_or_else(|e| {
+                landing::parse(&html).unwrap_or_else(|e| {
                     warn!(error = %e, "could not parse landing page; continuing without title/bib/abstract");
-                    scrape::Landing::default()
+                    landing::Landing::default()
                 })
             }
             Err(e) => {
                 warn!(error = %e, "could not fetch landing page; continuing without title/bib/abstract");
-                scrape::Landing::default()
+                landing::Landing::default()
             }
         };
 

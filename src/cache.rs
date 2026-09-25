@@ -15,11 +15,11 @@
 //!         ...
 //! ```
 //!
-//! Version directory names use the canonical form from `crate::version`
+//! Version directory names use the canonical form from `crate::ids::version`
 //! (filesystem-friendly basic ISO 8601 UTC).
 
-use crate::id::PaperId;
-use crate::version;
+use crate::ids::PaperId;
+use crate::ids::version;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 

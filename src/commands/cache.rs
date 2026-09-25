@@ -20,8 +20,8 @@ pub async fn run(cx: &Context, args: CacheArgs) -> Result<()> {
 #[derive(Debug, Serialize)]
 struct CachedPaper {
     id: String,
-    current_version: Option<crate::version::Canonical>,
-    versions: Vec<crate::version::Canonical>,
+    current_version: Option<crate::ids::version::Canonical>,
+    versions: Vec<crate::ids::version::Canonical>,
     total_bytes: u64,
 }
 
@@ -66,7 +66,7 @@ async fn list(cx: &Context) -> Result<()> {
         };
         nums.sort_by_key(|(n, _)| *n);
         for (num, paper_dir) in nums {
-            let id = crate::id::PaperId { year, num };
+            let id = crate::ids::PaperId { year, num };
             // Skip directories without one of our paper-meta files —
             // matches `clear`'s positive-identification policy.
             let Some(pm) = cache::read_paper_meta(root, id).await else {

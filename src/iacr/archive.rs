@@ -10,8 +10,8 @@
 //! signals an upstream template change. Top-level callers can demote to
 //! a warn and fall back to whatever they already have.
 
-use crate::net::{self, RateLimiter};
-use crate::version;
+use crate::iacr::http::{self, RateLimiter};
+use crate::ids::version;
 use std::sync::OnceLock;
 
 #[derive(Debug, Clone)]
@@ -47,7 +47,7 @@ pub async fn fetch_versions(
     rl: &RateLimiter,
     archive_url: &str,
 ) -> Result<Vec<ArchiveVersion>, Error> {
-    let body = net::get_text(client, rl, archive_url).await?;
+    let body = http::get_text(client, rl, archive_url).await?;
     parse_archive_page(&body).map_err(Into::into)
 }
 

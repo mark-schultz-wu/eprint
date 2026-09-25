@@ -1,19 +1,14 @@
 //! `eprint` CLI entry point.
 
-mod archive;
 mod cache;
 mod cli;
 mod commands;
 mod config;
 mod exit;
-mod feed;
-mod id;
+mod iacr;
+mod ids;
 mod markdown;
-mod net;
-mod oai;
-mod scrape;
-mod source;
-mod version;
+mod sources;
 
 use anyhow::Result;
 use clap::Parser;
@@ -30,13 +25,13 @@ async fn main() -> Result<()> {
     if let Some(h) = args.sync_stale_hours {
         cfg.sync.stale_after_hours = h;
     }
-    let rate_limiter = net::rate_limiter(cfg.network.min_interval_s, 3);
+    let rate_limiter = iacr::http::rate_limiter(cfg.network.min_interval_s, 3);
     let cx = cli::Context { cfg, offline: args.offline, json: args.json, rate_limiter };
     let result = match args.command {
         cli::Command::Paper(c) => commands::paper::run(&cx, c).await,
         cli::Command::Sync(c) => commands::sync::run(&cx, c).await,
         cli::Command::Feed(c) => commands::feed::run(&cx, c).await,
-        cli::Command::Cache(c) => commands::cache_cmd::run(&cx, c).await,
+        cli::Command::Cache(c) => commands::cache::run(&cx, c).await,
     };
     // Map typed failures to distinct, scriptable exit codes. Printing/exiting
     // here (rather than returning the Result for anyhow's Termination) is what

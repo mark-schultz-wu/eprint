@@ -10,9 +10,9 @@
 
 use crate::cache;
 use crate::cli::{Context, SyncArgs};
-use crate::net;
-use crate::oai;
-use crate::version;
+use crate::iacr::http;
+use crate::iacr::oai;
+use crate::ids::version;
 use anyhow::Result;
 use std::path::Path;
 use time::macros::format_description;
@@ -99,7 +99,7 @@ async fn sync_impl(
     let from = effective_from(root, since, default_window_days).await;
     info!(from = %from, "starting OAI-PMH sync");
 
-    let client = net::client(cx.cfg.network.contact.as_deref())?;
+    let client = http::client(cx.cfg.network.contact.as_deref())?;
     let records = oai::list_records(&client, &cx.rate_limiter, Some(&from)).await?;
 
     let mut updated = 0usize;

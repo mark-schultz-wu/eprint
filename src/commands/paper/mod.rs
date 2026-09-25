@@ -1,7 +1,7 @@
 //! `eprint paper <id>` — describe + acquire.
 //!
-//! Orchestrates submodules: [`archive`] (eprint version listing),
-//! [`resolve`] (choose which version), [`fetch_one`] (download a
+//! Orchestrates submodules: [`known_versions`] (refresh the version
+//! listing), [`resolve`] (choose which version), [`fetch`] (download a
 //! specific version), [`convert`] (PDF → Markdown), [`emit`]
 //! (format output).
 //!
@@ -9,18 +9,18 @@
 //! [`PaperReport`] through. Each step is in its own module for
 //! testability.
 
-mod archive;
 mod convert;
 mod emit;
-mod fetch_one;
+mod fetch;
+mod known_versions;
 mod resolve;
 
 use crate::cache;
 use crate::cli::{Context, PaperArgs};
-use crate::id::PaperId;
-use crate::net;
-use crate::oai;
-use crate::version;
+use crate::ids::PaperId;
+use crate::iacr::http;
+use crate::iacr::oai;
+use crate::ids::version;
 use anyhow::{Context as _, Result};
 use serde::Serialize;
 use tracing::warn;
@@ -37,11 +37,11 @@ use tracing::warn;
 pub struct PaperReport {
     pub id: String,
     pub title: Option<String>,
-    pub current_version: Option<crate::version::Canonical>,
-    pub resolved_version: crate::version::Canonical,
+    pub current_version: Option<crate::ids::version::Canonical>,
+    pub resolved_version: crate::ids::version::Canonical,
     pub directory: String,
-    pub known_versions: Vec<crate::version::Canonical>,
-    pub cached_versions: Vec<crate::version::Canonical>,
+    pub known_versions: Vec<crate::ids::version::Canonical>,
+    pub cached_versions: Vec<crate::ids::version::Canonical>,
     /// Converter that produced the cached `paper.md`, if there is one.
     pub md_converter: Option<String>,
     pub bytes_downloaded: u64,
@@ -80,7 +80,7 @@ impl ReportBuilder {
     /// report's `resolved_version`/`directory` are non-`Option`. The remaining
     /// metadata fields (title, versions, md_converter) default to empty and are
     /// set by the caller afterwards.
-    pub fn resolve(self, version: crate::version::Canonical, directory: String) -> PaperReport {
+    pub fn resolve(self, version: crate::ids::version::Canonical, directory: String) -> PaperReport {
         PaperReport {
             id: self.id,
             title: None,
@@ -107,7 +107,7 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     let mut paper_meta = cache::read_paper_meta(root, id).await;
     let need_archive = args.force || paper_meta.as_ref().map(|p| p.known_versions.is_empty()).unwrap_or(true);
     if need_archive && !cx.offline {
-        match archive::refresh_known_versions(cx, id, paper_meta.clone()).await {
+        match known_versions::refresh(cx, id, paper_meta.clone()).await {
             Ok(new_meta) => {
                 paper_meta = Some(new_meta);
                 report.action("archive-listed");
@@ -126,7 +126,7 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
         .and_then(|p| p.current_version.as_ref())
         .is_some();
     if !have_current && !cx.offline {
-        let client = net::client(cx.cfg.network.contact.as_deref())?;
+        let client = http::client(cx.cfg.network.contact.as_deref())?;
         match oai::get_record(&client, &cx.rate_limiter, id).await {
             Ok(Some(rec)) => match rec.datestamp.parse::<version::OaiDatestamp>() {
                 Ok(ds) => {
@@ -189,7 +189,7 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     // steps only append to the running log, so they keep taking the builder;
     // the report itself isn't materialized until resolution is final.
     let version = v;
-    fetch_one::ensure_version(cx, id, &version, paper_meta.as_mut(), &mut report).await?;
+    fetch::ensure_version(cx, id, &version, paper_meta.as_mut(), &mut report).await?;
 
     // 3b. Persist the OAI abstract if the best-effort landing scrape didn't
     //     already write one for this version.

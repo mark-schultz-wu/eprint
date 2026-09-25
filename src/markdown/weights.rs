@@ -121,11 +121,11 @@ fn sidecar(path: &Path) -> PathBuf {
     PathBuf::from(s)
 }
 
-/// A client for multi-GB downloads: unlike `net::client` there's no total
+/// A client for multi-GB downloads: unlike `http::client` there's no total
 /// timeout, only connect/read stall timeouts. Hugging Face isn't eprint, so
 /// the eprint rate limiter doesn't apply.
 fn download_client(cx: &Context) -> Result<reqwest::Client> {
-    let ua = crate::net::user_agent(cx.cfg.network.contact.as_deref());
+    let ua = crate::iacr::http::user_agent(cx.cfg.network.contact.as_deref());
     reqwest::Client::builder()
         .user_agent(ua)
         .connect_timeout(Duration::from_secs(30))
