@@ -2,7 +2,7 @@
 //!
 //! Some failure modes are *silent* today — they log a `warn!` and then either
 //! return `Ok(())` or write empty output, so a caller scripting `eprint` (the
-//! companion watcher, a batch shell loop over the downloads dir) sees exit 0
+//! batch shell loop over paper ids) sees exit 0
 //! and assumes success. Tracing alone can't fix that: the configured log level
 //! may suppress the warning entirely.
 //!
@@ -15,13 +15,12 @@
 #[derive(thiserror::Error, Debug)]
 pub enum CommandFailure {
     /// No version could be resolved: the archive listing failed and the
-    /// OAI fallback was empty, so there is nothing to file the PDF under. A
-    /// local downloaded PDF, if present, goes unused — not missing, just
-    /// un-fileable.
+    /// OAI fallback was empty, so there is nothing to fetch or file the PDF
+    /// under.
     #[error("{0}")]
     NoVersionResolved(String),
 
-    /// No source produced the PDF bytes (downloads dir empty for this id,
+    /// No source produced the PDF bytes (not cached under --offline,
     /// HTTP fetch failed or rate-limited past the retry budget, etc.).
     #[error("{0}")]
     PdfUnavailable(String),

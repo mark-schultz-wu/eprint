@@ -31,9 +31,7 @@ The base tool is self-contained — no runtime dependencies:
 PDFs are fetched from `eprint.iacr.org` over HTTP, current and historical
 versions alike. The host rate-limits per IP (HTTP 429 after ~20 rapid
 requests); the CLI paces itself (`EPRINT_MIN_INTERVAL_S`, default 2 s) and
-backs off and retries on 429. A PDF already saved in the downloads dir
-(`EPRINT_DOWNLOADS_DIR`, default `~/Downloads`) as `<year>-<num>.pdf` is used
-for the current version without fetching; an S3 source is planned. See
+backs off and retries on 429. An S3 source is planned. See
 `eprint/src/source.rs`.
 
 ## CLI

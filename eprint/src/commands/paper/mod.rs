@@ -159,13 +159,10 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     // 3. Ensure that version's PDF is on disk.
     let Some(v) = target_version else {
         // No version to operate on: the archive scrape failed AND the OAI
-        // fallback didn't yield a current version. The PDF source
-        // list is never consulted, so any local PDF in the downloads dir goes
-        // unused — not because it's missing, but because there's no version to
-        // file it under. This used to fall through to an (almost empty) report
-        // and exit 0, masking the failure; make it a hard, coded error instead.
-        let downloads_pdf = crate::downloads::expected_pdf_path(&cx.cfg.downloads_dir, id);
-        warn!(id = %id, offline = cx.offline, downloads_pdf = %downloads_pdf.display(), "no version resolved");
+        // fallback didn't yield a current version, so there's nothing to fetch
+        // or file a PDF under. This used to fall through to an (almost empty)
+        // report and exit 0, masking the failure; make it a hard, coded error.
+        warn!(id = %id, offline = cx.offline, "no version resolved");
         let why = if cx.offline {
             "nothing is cached for it and --offline skips the archive listing and OAI-PMH; \
              re-run without --offline"
@@ -182,9 +179,7 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
             )
         };
         return Err(crate::exit::CommandFailure::NoVersionResolved(format!(
-            "could not resolve a version for {id}: {why}. (A PDF at {} can't be filed without a \
-             version.)",
-            downloads_pdf.display(),
+            "could not resolve a version for {id}: {why}."
         ))
         .into());
     };

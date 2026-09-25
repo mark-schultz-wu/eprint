@@ -1,7 +1,7 @@
 //! Ensure a specific version of a paper's PDF is in the cache.
 //!
 //! PDF bytes are acquired through the pluggable source list in
-//! [`crate::source`] (downloads dir, then network; S3 later). Metadata
+//! [`crate::source`] (eprint over HTTP; S3 later). Metadata
 //! (title/bib/abstract) is scraped from the landing page best-effort, and
 //! per-version + paper-level meta are updated on success.
 
@@ -33,8 +33,8 @@ pub async fn ensure_version(
     }
     tokio::fs::create_dir_all(&paths.dir).await?;
 
-    // Is this the paper's current version? Some sources (the downloads dir)
-    // only ever hold the current PDF; historical versions come from elsewhere.
+    // Is this the paper's current version? It picks the PDF URL, and whether
+    // the landing page's bib/abstract apply to this version.
     let current = paper_meta.as_deref().and_then(|p| p.current_version.as_ref());
     let is_current = current == Some(version);
     debug!(
@@ -42,7 +42,7 @@ pub async fn ensure_version(
         target_version = %version,
         current_version = ?current,
         is_current,
-        "resolving PDF source eligibility (is_current gates the downloads source)"
+        "acquiring PDF"
     );
 
     // Pull the bytes from the first source that has them.
@@ -59,11 +59,7 @@ pub async fn ensure_version(
     if acquired.network {
         report.add_downloaded(acquired.bytes.len() as u64);
     }
-    report.action(match acquired.source {
-        "downloads" => "pdf-from-downloads",
-        _ if is_current => "fetched-pdf",
-        _ => "fetched-historical-pdf",
-    });
+    report.action(if is_current { "fetched-pdf" } else { "fetched-historical-pdf" });
 
     // Scrape the landing page for metadata when:
     //   * we're on the current version (its canonical bib/abstract live there), OR
