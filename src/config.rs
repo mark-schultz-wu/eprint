@@ -7,7 +7,7 @@
 //!
 //! | Var                          | Meaning                                                           |
 //! |------------------------------|-------------------------------------------------------------------|
-//! | `EPRINT_CACHE_DIR`           | cache root (default: `$XDG_CACHE_HOME/eprint`)                    |
+//! | `EPRINT_CACHE_DIR`           | cache root (default: OS cache dir + `/eprint`)                    |
 //! | `EPRINT_CONTACT`             | contact appended to outbound `User-Agent`                         |
 //! | `EPRINT_MIN_INTERVAL_S`      | minimum seconds between outbound HTTP requests (default `2.0`)    |
 //! | `EPRINT_MD_DEVICE`           | Markdown converter device: `metal`, `cuda`, `cpu` (default: best built-in) |
