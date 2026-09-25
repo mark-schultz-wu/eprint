@@ -23,11 +23,12 @@ pub struct Cli {
     /// Log output format.
     #[arg(long, value_enum, default_value_t = LogFormat::Pretty, global = true)]
     pub log_format: LogFormat,
-    /// Run OAI-PMH sync if cache is stale.
-    #[arg(long, global = true, env = "EPRINT_AUTO_SYNC", value_parser = clap::value_parser!(bool))]
+    /// Run OAI-PMH sync if the cache is stale (true/false, yes/no, 1/0,
+    /// on/off). Overrides EPRINT_AUTO_SYNC.
+    #[arg(long, global = true, value_parser = clap::builder::BoolishValueParser::new())]
     pub auto_sync: Option<bool>,
-    /// Cache staleness threshold in hours.
-    #[arg(long, global = true, env = "EPRINT_SYNC_STALE_HOURS")]
+    /// Cache staleness threshold in hours. Overrides EPRINT_SYNC_STALE_HOURS.
+    #[arg(long, global = true)]
     pub sync_stale_hours: Option<u32>,
 
     #[command(subcommand)]
@@ -154,4 +155,29 @@ pub enum CacheCommand {
         #[arg(long)]
         models: bool,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regression: clap also read EPRINT_AUTO_SYNC with a strict true/false
+    /// parser, so `EPRINT_AUTO_SYNC=1` (documented as valid) made every
+    /// command fail to parse. Env vars now belong to `config` alone.
+    #[test]
+    fn env_vars_do_not_reach_argument_parsing() {
+        std::env::set_var("EPRINT_AUTO_SYNC", "1");
+        std::env::set_var("EPRINT_SYNC_STALE_HOURS", "not a number");
+        let cli = Cli::try_parse_from(["eprint", "cache", "path"]).unwrap();
+        assert_eq!(cli.auto_sync, None);
+        assert_eq!(cli.sync_stale_hours, None);
+    }
+
+    #[test]
+    fn auto_sync_flag_accepts_boolish_values() {
+        for (arg, want) in [("yes", true), ("1", true), ("off", false), ("false", false)] {
+            let cli = Cli::try_parse_from(["eprint", "--auto-sync", arg, "cache", "path"]).unwrap();
+            assert_eq!(cli.auto_sync, Some(want), "--auto-sync {arg}");
+        }
+    }
 }

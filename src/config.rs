@@ -14,7 +14,9 @@
 //! | `EPRINT_AUTO_SYNC`           | `true` (default) / `false` — auto-run OAI-PMH sync on staleness   |
 //! | `EPRINT_SYNC_STALE_HOURS`    | hours after which the cache is considered stale (default `24`)    |
 //!
-//! CLI flags override env vars for the per-invocation settings; see `cli`.
+//! This module is the only reader of these variables; the `--auto-sync` and
+//! `--sync-stale-hours` flags override them (see `main`). A set but
+//! unparseable value is warned about and ignored.
 
 use std::path::PathBuf;
 
@@ -71,19 +73,50 @@ fn env_string(key: &str) -> Option<String> {
     std::env::var(key).ok().filter(|s| !s.is_empty())
 }
 
+/// Parse an env var, warning (rather than silently falling back to the
+/// default) when it's set but unparseable.
+fn env_parsed<T>(key: &str, parse: impl FnOnce(&str) -> Option<T>) -> Option<T> {
+    let raw = env_string(key)?;
+    let parsed = parse(&raw);
+    if parsed.is_none() {
+        tracing::warn!("ignoring {key}={raw:?}: not a valid value; using the default");
+    }
+    parsed
+}
+
 fn env_f64(key: &str) -> Option<f64> {
-    env_string(key).and_then(|s| s.parse().ok())
+    env_parsed(key, |s| s.parse().ok())
 }
 
 fn env_u32(key: &str) -> Option<u32> {
-    env_string(key).and_then(|s| s.parse().ok())
+    env_parsed(key, |s| s.parse().ok())
 }
 
 fn env_bool(key: &str) -> Option<bool> {
-    let s = env_string(key)?.to_ascii_lowercase();
-    match s.as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
+    env_parsed(key, parse_bool)
+}
+
+/// The same spellings clap's `BoolishValueParser` accepts for `--auto-sync`.
+fn parse_bool(s: &str) -> Option<bool> {
+    match s.to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "y" | "on" => Some(true),
+        "0" | "false" | "no" | "n" | "off" => Some(false),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_bool_accepts_common_spellings() {
+        for s in ["1", "true", "YES", "on", "y"] {
+            assert_eq!(parse_bool(s), Some(true), "{s}");
+        }
+        for s in ["0", "false", "No", "off", "n"] {
+            assert_eq!(parse_bool(s), Some(false), "{s}");
+        }
+        assert_eq!(parse_bool("maybe"), None);
     }
 }
