@@ -106,7 +106,11 @@ impl ReportBuilder {
 
 pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     let id: PaperId = args.id.parse().context("parsing paper id")?;
-    crate::commands::sync::maybe_auto_sync(cx).await?;
+    // Auto-sync only refreshes staleness hints; a failure (OAI down,
+    // rate-limited) mustn't stop us from serving the paper.
+    if let Err(e) = crate::commands::sync::maybe_auto_sync(cx).await {
+        warn!("auto-sync failed, continuing without it: {e:#}");
+    }
 
     let mut report = ReportBuilder::new(id.canonical());
     let root = &cx.cfg.cache_root;

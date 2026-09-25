@@ -16,7 +16,7 @@ use anyhow::Result;
 use std::path::Path;
 use time::macros::format_description;
 use time::OffsetDateTime;
-use tracing::info;
+use tracing::{info, warn};
 
 #[derive(Debug, serde::Serialize)]
 pub struct SyncReport {
@@ -96,17 +96,7 @@ async fn sync_impl(
     let client = http::client(cx.cfg.network.contact.as_deref())?;
     let records = oai::list_records(&client, &cx.rate_limiter, Some(&from)).await?;
 
-    let mut updated = 0usize;
-    for rec in &records {
-        let Some(mut paper_meta) = cache::read_paper_meta(root, rec.id).await else {
-            continue;
-        };
-        let oai: version::OaiDatestamp = rec.datestamp.parse()?;
-        if paper_meta.note_modified((&oai).into()) {
-            cache::write_paper_meta(root, rec.id, &paper_meta).await?;
-            updated += 1;
-        }
-    }
+    let updated = apply_records(root, &records).await?;
 
     let now = now_unix();
     cache::write_last_sync(root, now).await?;
@@ -116,6 +106,30 @@ async fn sync_impl(
         cached_papers_updated: updated,
         last_sync_unix_s: now,
     })
+}
+
+/// Record each OAI record's datestamp on the matching cached paper (if
+/// any). Returns how many papers changed. A record with a malformed
+/// datestamp is skipped with a warning rather than failing the whole sync.
+async fn apply_records(root: &Path, records: &[oai::RecordHeader]) -> Result<usize> {
+    let mut updated = 0;
+    for rec in records {
+        let Some(mut paper_meta) = cache::read_paper_meta(root, rec.id).await else {
+            continue;
+        };
+        let oai: version::OaiDatestamp = match rec.datestamp.parse() {
+            Ok(d) => d,
+            Err(e) => {
+                warn!(id = %rec.id, error = %e, "skipping OAI record with a malformed datestamp");
+                continue;
+            }
+        };
+        if paper_meta.note_modified((&oai).into()) {
+            cache::write_paper_meta(root, rec.id, &paper_meta).await?;
+            updated += 1;
+        }
+    }
+    Ok(updated)
 }
 
 async fn effective_from(root: &Path, explicit: Option<&str>, default_window_days: u32) -> String {
@@ -144,6 +158,44 @@ fn iso_date_from_unix(unix_s: i64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ids::PaperId;
+
+    fn rec(year: u16, num: u32, datestamp: &str) -> oai::RecordHeader {
+        oai::RecordHeader {
+            id: PaperId { year, num },
+            datestamp: datestamp.into(),
+        }
+    }
+
+    /// Regression: one malformed datestamp used to abort the whole sync.
+    #[tokio::test]
+    async fn malformed_datestamps_are_skipped_not_fatal() {
+        let root = tempfile::tempdir().unwrap();
+        let cached = [
+            PaperId { year: 2024, num: 1 },
+            PaperId { year: 2024, num: 2 },
+        ];
+        for id in cached {
+            let v = "20240101T000000Z".parse().unwrap();
+            cache::write_paper_meta(root.path(), id, &cache::PaperMeta::for_first_fetch(v))
+                .await
+                .unwrap();
+        }
+        let records = [
+            rec(2024, 1, "not a datestamp"),
+            rec(2024, 2, "2025-01-06T17:43:48Z"),
+            rec(2024, 3, "2025-01-06T17:43:48Z"), // not cached: ignored
+        ];
+        assert_eq!(apply_records(root.path(), &records).await.unwrap(), 1);
+        let m = cache::read_paper_meta(root.path(), cached[1])
+            .await
+            .unwrap();
+        assert_eq!(m.last_modified.unwrap().to_string(), "20250106T174348Z");
+        assert!(m.needs_listing());
+        // Re-applying the same records changes nothing.
+        assert_eq!(apply_records(root.path(), &records).await.unwrap(), 0);
+    }
+
     #[test]
     fn date_math_known_points() {
         assert_eq!(iso_date_from_unix(0), "1970-01-01");
