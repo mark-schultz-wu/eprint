@@ -71,34 +71,57 @@ pub async fn ensure(cx: &Context) -> Result<PathBuf> {
     let dir = model_dir(&cx.cfg.cache_root);
     tokio::fs::create_dir_all(&dir).await?;
     prune_other_revisions(&dir);
-    let missing: Vec<&ModelFile> = FILES.iter().filter(|f| !is_verified(&dir, f)).collect();
-    if missing.is_empty() {
-        return Ok(dir);
-    }
-    let total: u64 = missing.iter().map(|f| f.size).sum();
-    if cx.offline {
-        bail!(
-            "the Markdown converter's model weights ({:.1} GB) aren't downloaded yet and \
-             --offline forbids fetching them; re-run without --offline once to download \
-             them into {}",
-            gb(total),
-            dir.display(),
-        );
-    }
-    if !cx.json {
-        eprintln!(
-            "Downloading the Markdown model ({REPO}, {:.1} GB) into {} — one-time.",
-            gb(total),
-            dir.display(),
-        );
-    }
-    let client = download_client(cx)?;
-    for file in missing {
-        download(&client, &dir, file, !cx.json)
-            .await
-            .with_context(|| format!("downloading model file {}", file.name))?;
-    }
+    let fetch = Fetch {
+        client: download_client(cx)?,
+        base_url: format!("https://huggingface.co/{REPO}/resolve/{REVISION}"),
+        offline: cx.offline,
+        progress: !cx.json,
+    };
+    fetch.all(&dir, FILES).await?;
     Ok(dir)
+}
+
+/// Where and how to fetch weight files: `<base_url>/<file name>`.
+struct Fetch {
+    client: reqwest::Client,
+    base_url: String,
+    offline: bool,
+    progress: bool,
+}
+
+impl Fetch {
+    /// Download (or resume, or just verify) whichever of `files` aren't
+    /// already verified in `dir`.
+    async fn all(&self, dir: &Path, files: &[ModelFile]) -> Result<()> {
+        let missing: Vec<&ModelFile> = files.iter().filter(|f| !is_verified(dir, f)).collect();
+        if missing.is_empty() {
+            return Ok(());
+        }
+        let total: u64 = missing.iter().map(|f| f.size).sum();
+        if self.offline {
+            bail!(
+                "the Markdown converter's model weights ({:.1} GB) aren't downloaded yet and \
+                 --offline forbids fetching them; re-run without --offline once to download \
+                 them into {}",
+                gb(total),
+                dir.display(),
+            );
+        }
+        if self.progress {
+            eprintln!(
+                "Downloading the Markdown model ({REPO}, {:.1} GB) into {} — one-time.",
+                gb(total),
+                dir.display(),
+            );
+        }
+        for file in missing {
+            let url = format!("{}/{}", self.base_url, file.name);
+            download(&self.client, &url, dir, file, self.progress)
+                .await
+                .with_context(|| format!("downloading model file {}", file.name))?;
+        }
+        Ok(())
+    }
 }
 
 /// Delete weights for revisions other than the pinned one (left behind when
@@ -149,16 +172,13 @@ fn download_client(cx: &Context) -> Result<reqwest::Client> {
 
 async fn download(
     client: &reqwest::Client,
+    url: &str,
     dir: &Path,
     f: &ModelFile,
     progress: bool,
 ) -> Result<()> {
     let dest = dir.join(f.name);
     let part = dir.join(format!("{}.part", f.name));
-    let url = format!(
-        "https://huggingface.co/{REPO}/resolve/{REVISION}/{}",
-        f.name
-    );
 
     // Resume: hash whatever an earlier attempt already wrote, then ask for the rest.
     let mut hasher = Sha256::new();
@@ -178,7 +198,7 @@ async fn download(
     }
     // A complete `.part` (e.g. a crash between download and rename) only needs verifying.
     if have < f.size {
-        let mut req = client.get(&url);
+        let mut req = client.get(url);
         if have > 0 {
             req = req.header(reqwest::header::RANGE, format!("bytes={have}-"));
         }
@@ -245,6 +265,196 @@ fn gb(bytes: u64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    const CONFIG_BYTES: &[u8] = br#"{"fake": "config"}"#;
+    const CONFIG: ModelFile = ModelFile {
+        name: "config.json",
+        size: 18,
+        sha256: "1fd7af4283193e7e4a6d039b6ffb6413c315aa123563602047fa8d0976ab834a",
+    };
+    /// 100 KiB of `0..=255` repeated: big enough to resume partway.
+    fn weights_bytes() -> Vec<u8> {
+        (0..=255u8).cycle().take(102_400).collect()
+    }
+    const WEIGHTS: ModelFile = ModelFile {
+        name: "model.safetensors",
+        size: 102_400,
+        sha256: "27783e87963a4efb6829b531c9ba57b44f45797f6770bd637fbf0d807cbdbae0",
+    };
+
+    fn fetch(server: &MockServer, offline: bool) -> (Fetch, String) {
+        let base = format!("{}/repo", server.uri());
+        let f = Fetch {
+            client: reqwest::Client::new(),
+            base_url: base.clone(),
+            offline,
+            progress: false,
+        };
+        (f, base)
+    }
+
+    async fn serve(server: &MockServer, name: &str, body: Vec<u8>) {
+        Mock::given(method("GET"))
+            .and(path(format!("/repo/{name}")))
+            .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
+            .mount(server)
+            .await;
+    }
+
+    async fn requests(server: &MockServer) -> usize {
+        server.received_requests().await.unwrap().len()
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn downloads_verifies_and_then_trusts_the_sidecars() {
+        let server = MockServer::start().await;
+        serve(&server, "config.json", CONFIG_BYTES.to_vec()).await;
+        serve(&server, "model.safetensors", weights_bytes()).await;
+        let dir = tempfile::tempdir().unwrap();
+        let (f, _) = fetch(&server, false);
+
+        f.all(dir.path(), &[CONFIG, WEIGHTS]).await.unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("config.json")).unwrap(),
+            CONFIG_BYTES
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("model.safetensors")).unwrap(),
+            weights_bytes()
+        );
+        assert!(is_verified(dir.path(), &CONFIG) && is_verified(dir.path(), &WEIGHTS));
+        assert!(!dir.path().join("model.safetensors.part").exists());
+        assert_eq!(requests(&server).await, 2);
+
+        f.all(dir.path(), &[CONFIG, WEIGHTS]).await.unwrap();
+        assert_eq!(
+            requests(&server).await,
+            2,
+            "verified files aren't re-fetched"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resumes_a_partial_download_with_a_range_request() {
+        let server = MockServer::start().await;
+        let full = weights_bytes();
+        Mock::given(method("GET"))
+            .and(path("/repo/model.safetensors"))
+            .and(header("range", "bytes=40000-"))
+            .respond_with(ResponseTemplate::new(206).set_body_bytes(full[40_000..].to_vec()))
+            .mount(&server)
+            .await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("model.safetensors.part"), &full[..40_000]).unwrap();
+        let (f, _) = fetch(&server, false);
+
+        f.all(dir.path(), &[WEIGHTS]).await.unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("model.safetensors")).unwrap(),
+            full
+        );
+        assert!(is_verified(dir.path(), &WEIGHTS));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn restarts_when_the_server_ignores_the_range() {
+        let server = MockServer::start().await;
+        serve(&server, "model.safetensors", weights_bytes()).await; // always 200, full body
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("model.safetensors.part"),
+            &weights_bytes()[..40_000],
+        )
+        .unwrap();
+        let (f, _) = fetch(&server, false);
+
+        f.all(dir.path(), &[WEIGHTS]).await.unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("model.safetensors")).unwrap(),
+            weights_bytes()
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_oversized_part_is_discarded() {
+        let server = MockServer::start().await;
+        serve(&server, "config.json", CONFIG_BYTES.to_vec()).await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("config.json.part"), vec![b'x'; 100]).unwrap();
+        let (f, _) = fetch(&server, false);
+
+        f.all(dir.path(), &[CONFIG]).await.unwrap();
+        assert_eq!(
+            std::fs::read(dir.path().join("config.json")).unwrap(),
+            CONFIG_BYTES
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_corrupt_download_is_rejected_and_deleted() {
+        let server = MockServer::start().await;
+        serve(&server, "config.json", br#"{"fake": "CONFIG"}"#.to_vec()).await; // same size, wrong bytes
+        let dir = tempfile::tempdir().unwrap();
+        let (f, _) = fetch(&server, false);
+
+        let err = format!("{:#}", f.all(dir.path(), &[CONFIG]).await.unwrap_err());
+        assert!(err.contains("failed verification"), "{err}");
+        assert!(!dir.path().join("config.json").exists());
+        assert!(
+            !dir.path().join("config.json.part").exists(),
+            "a retry starts fresh"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_http_error_is_reported() {
+        let server = MockServer::start().await; // nothing mounted: 404
+        let dir = tempfile::tempdir().unwrap();
+        let (f, base) = fetch(&server, false);
+        let err = format!("{:#}", f.all(dir.path(), &[CONFIG]).await.unwrap_err());
+        assert!(err.contains(&format!("{base}/config.json")), "{err}");
+        assert!(err.contains("downloading model file config.json"), "{err}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_complete_part_is_verified_without_downloading() {
+        let server = MockServer::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("model.safetensors.part"), weights_bytes()).unwrap();
+        let (f, _) = fetch(&server, false);
+
+        f.all(dir.path(), &[WEIGHTS]).await.unwrap();
+        assert!(is_verified(dir.path(), &WEIGHTS));
+        assert_eq!(requests(&server).await, 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn offline_refuses_to_download_but_accepts_verified_files() {
+        let server = MockServer::start().await;
+        serve(&server, "config.json", CONFIG_BYTES.to_vec()).await;
+        let dir = tempfile::tempdir().unwrap();
+
+        let (offline, _) = fetch(&server, true);
+        let err = offline
+            .all(dir.path(), &[CONFIG])
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("--offline forbids fetching them"), "{err}");
+        assert_eq!(requests(&server).await, 0);
+
+        let (online, _) = fetch(&server, false);
+        online.all(dir.path(), &[CONFIG]).await.unwrap();
+        offline.all(dir.path(), &[CONFIG]).await.unwrap();
+    }
+
+    #[test]
+    fn download_size_is_the_sum_of_the_pinned_files() {
+        assert_eq!(download_bytes(), 2_323_553_561);
+    }
 
     #[test]
     fn model_dir_is_keyed_by_revision() {
