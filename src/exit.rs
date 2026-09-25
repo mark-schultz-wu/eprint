@@ -29,6 +29,11 @@ pub enum CommandFailure {
     /// content on any page, e.g. a blank or unrenderable PDF).
     #[error("{0}")]
     EmptyConversion(String),
+
+    /// Conversion finished, but some pages failed: the Markdown has
+    /// placeholders for them, and re-running retries just those pages.
+    #[error("{0}")]
+    PartialConversion(String),
 }
 
 impl CommandFailure {
@@ -39,6 +44,7 @@ impl CommandFailure {
             CommandFailure::NoVersionResolved(_) => 2,
             CommandFailure::PdfUnavailable(_) => 3,
             CommandFailure::EmptyConversion(_) => 4,
+            CommandFailure::PartialConversion(_) => 5,
         }
     }
 
@@ -59,6 +65,7 @@ mod tests {
         assert_eq!(CommandFailure::NoVersionResolved(String::new()).code(), 2);
         assert_eq!(CommandFailure::PdfUnavailable(String::new()).code(), 3);
         assert_eq!(CommandFailure::EmptyConversion(String::new()).code(), 4);
+        assert_eq!(CommandFailure::PartialConversion(String::new()).code(), 5);
     }
 
     #[test]

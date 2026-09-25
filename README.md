@@ -31,7 +31,8 @@ eprint cache {path,list,clear}          # clear keeps the Markdown model; --mode
 Global flags: `--offline`, `--json`, `-v`/`-vv`/`-vvv`, `--log-format=json`.
 Paper ids can be `2024/463`, `2024-463`, or a full eprint URL. Scripts can
 tell failures apart by exit code: 2 (no version resolved), 3 (PDF
-unavailable), 4 (empty conversion), 1 (anything else).
+unavailable), 4 (empty conversion), 5 (some pages failed to convert; re-run
+`--md` to retry them), 1 (anything else).
 
 ## Markdown conversion
 

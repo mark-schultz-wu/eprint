@@ -46,48 +46,58 @@ impl Renderer {
     }
 }
 
+/// A PDF of `pages` pages, each 200×100 pt with a black rectangle at
+/// x 10–60, y 10–40 (PDF coordinates: origin bottom-left).
+#[cfg(test)]
+pub(crate) fn test_pdf(pages: usize) -> Vec<u8> {
+    let content = "0 0 0 rg 10 10 50 30 re f";
+    let kids: Vec<String> = (0..pages).map(|i| format!("{} 0 R", 3 + 2 * i)).collect();
+    let mut objects = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {pages} >>",
+            kids.join(" ")
+        ),
+    ];
+    for i in 0..pages {
+        let contents = 4 + 2 * i;
+        objects.push(format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents {contents} 0 R >>"
+        ));
+        objects.push(format!(
+            "<< /Length {} >>\nstream\n{content}\nendstream",
+            content.len()
+        ));
+    }
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, body) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
+    for off in offsets {
+        pdf.extend(format!("{off:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .as_bytes(),
+    );
+    pdf
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use hayro::hayro_syntax::Pdf;
 
-    /// A one-page PDF, 200×100 pt, with a black rectangle at x 10–60,
-    /// y 10–40 (PDF coordinates: origin bottom-left).
-    fn one_page_pdf() -> Vec<u8> {
-        let content = "0 0 0 rg 10 10 50 30 re f";
-        let objects = [
-            "<< /Type /Catalog /Pages 2 0 R >>".to_owned(),
-            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_owned(),
-            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 100] /Contents 4 0 R >>".to_owned(),
-            format!(
-                "<< /Length {} >>\nstream\n{content}\nendstream",
-                content.len()
-            ),
-        ];
-        let mut pdf = b"%PDF-1.4\n".to_vec();
-        let mut offsets = Vec::new();
-        for (i, body) in objects.iter().enumerate() {
-            offsets.push(pdf.len());
-            pdf.extend(format!("{} 0 obj\n{body}\nendobj\n", i + 1).as_bytes());
-        }
-        let xref = pdf.len();
-        pdf.extend(format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes());
-        for off in offsets {
-            pdf.extend(format!("{off:010} 00000 n \n").as_bytes());
-        }
-        pdf.extend(
-            format!(
-                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
-                objects.len() + 1
-            )
-            .as_bytes(),
-        );
-        pdf
-    }
-
     #[test]
     fn renders_at_the_requested_dpi_on_white() {
-        let pdf = Pdf::new(one_page_pdf()).unwrap();
+        let pdf = Pdf::new(test_pdf(1)).unwrap();
         let page = &pdf.pages()[0];
 
         let img = Renderer::new(144.0).page_image(page); // 2 px per pt

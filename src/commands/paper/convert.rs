@@ -29,8 +29,38 @@ pub async fn maybe_run(
     }
     let converter_dir = markdown::CONVERTER_ID.replace('@', "-");
     remove_stale_page_caches(&paths.md_pages, &converter_dir);
-    let md = markdown::convert(cx, &paths.pdf, &paths.md_pages.join(&converter_dir)).await?;
-    tokio::fs::write(&paths.md, &md).await?;
+    let converted = markdown::convert(cx, &paths.pdf, &paths.md_pages.join(&converter_dir)).await?;
+    record(root, id, version, &converted, report).await
+}
+
+/// Write the conversion's Markdown, and mark the version converted only if
+/// every page succeeded; otherwise report a partial conversion.
+async fn record(
+    root: &Path,
+    id: PaperId,
+    version: &Canonical,
+    converted: &markdown::Converted,
+    report: &mut ReportBuilder,
+) -> Result<()> {
+    let paths = cache::version_paths(root, id, version);
+    tokio::fs::create_dir_all(&paths.dir).await?;
+    tokio::fs::write(&paths.md, &converted.markdown).await?;
+    if !converted.failed_pages.is_empty() {
+        // Leave md_converter unset: the next `--md` retries the failed pages
+        // (the others are cached) instead of treating this as done.
+        let pages: Vec<String> = converted
+            .failed_pages
+            .iter()
+            .map(|p| p.to_string())
+            .collect();
+        return Err(crate::exit::CommandFailure::PartialConversion(format!(
+            "converted {id} version {version} except page(s) {} (placeholders mark them in \
+             {}); re-run with --md to retry just those pages",
+            pages.join(", "),
+            paths.md.display(),
+        ))
+        .into());
+    }
     let mut vmeta = cache::read_version_meta(root, id, version).await;
     vmeta.md_converter = Some(markdown::CONVERTER_ID.to_owned());
     cache::write_version_meta(root, id, version, &vmeta).await?;
@@ -55,6 +85,55 @@ fn remove_stale_page_caches(md_pages: &Path, keep: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn v() -> Canonical {
+        "20240319T143540Z".parse().unwrap()
+    }
+
+    const ID: PaperId = PaperId {
+        year: 2024,
+        num: 463,
+    };
+
+    #[tokio::test]
+    async fn a_complete_conversion_is_marked_done() {
+        let root = tempfile::tempdir().unwrap();
+        let mut report = ReportBuilder::new(ID.canonical());
+        let converted = markdown::Converted {
+            markdown: "# Paper\n".into(),
+            failed_pages: vec![],
+        };
+        record(root.path(), ID, &v(), &converted, &mut report)
+            .await
+            .unwrap();
+        let paths = cache::version_paths(root.path(), ID, &v());
+        assert_eq!(std::fs::read_to_string(paths.md).unwrap(), "# Paper\n");
+        let meta = cache::read_version_meta(root.path(), ID, &v()).await;
+        assert_eq!(meta.md_converter.as_deref(), Some(markdown::CONVERTER_ID));
+    }
+
+    /// A partial conversion keeps its Markdown but isn't marked done, so the
+    /// next `--md` retries the failed pages; it exits with code 5.
+    #[tokio::test]
+    async fn a_partial_conversion_is_written_but_not_marked_done() {
+        let root = tempfile::tempdir().unwrap();
+        let mut report = ReportBuilder::new(ID.canonical());
+        let converted = markdown::Converted {
+            markdown: "page 1\n\n<!-- page 2 could not be converted: boom -->\n".into(),
+            failed_pages: vec![2, 5],
+        };
+        let err = record(root.path(), ID, &v(), &converted, &mut report)
+            .await
+            .unwrap_err();
+        assert_eq!(crate::exit::CommandFailure::code_of(&err), 5);
+        assert!(err.to_string().contains("except page(s) 2, 5"), "{err}");
+        let paths = cache::version_paths(root.path(), ID, &v());
+        assert!(std::fs::read_to_string(paths.md)
+            .unwrap()
+            .contains("could not be converted"));
+        let meta = cache::read_version_meta(root.path(), ID, &v()).await;
+        assert_eq!(meta.md_converter, None);
+    }
 
     #[test]
     fn removes_only_other_converters_page_caches() {
