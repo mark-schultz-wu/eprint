@@ -85,7 +85,8 @@ cargo mutants -j 4          # mutation testing (cargo install cargo-mutants)
 (`wiremock`), pointed there with `EPRINT_BASE_URL`, so the full fetch / version
 / sync / offline flows are tested without touching eprint.iacr.org. CI
 (`.github/workflows/ci.yml`) runs fmt, clippy, and the tests on Linux and
-macOS, and checks the build on the minimum Rust version.
+macOS, checks the build on the minimum Rust version, and mutation-tests the
+lines each pull request changes (`cargo mutants --in-diff`).
 
 ## Notes
 
