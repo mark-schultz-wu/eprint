@@ -84,6 +84,10 @@ trait PageModel {
 }
 
 impl PageModel for MinerU {
+    // Needs the real model, so tests can't reach it. (An attribute rather
+    // than .cargo/mutants.toml: cargo-mutants 27.1 doesn't apply exclude_re
+    // to its struct-field deletions.)
+    #[cfg_attr(test, mutants::skip)]
     fn parse(&self, page: usize, image: &RgbImage) -> Result<Vec<DocumentBlock>> {
         let doc = self
             .parse_page(

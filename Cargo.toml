@@ -59,6 +59,8 @@ cuda = ["oar-ocr-vl/cuda"]
 tempfile = "3"
 # Fake eprint server for the end-to-end tests in tests/.
 wiremock = "0.6"
+# `#[cfg_attr(test, mutants::skip)]`: tells cargo-mutants to skip a function.
+mutants = "0.0.4"
 
 [[bin]]
 name = "eprint"
