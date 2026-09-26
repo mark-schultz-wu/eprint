@@ -30,6 +30,13 @@ pub const CONVERTER_ID: &str = "mineru2.5-pro-2605@bff20d4ae2bf";
 /// Rasterization resolution fed to the model (what the benchmark used).
 const RENDER_DPI: f32 = 150.0;
 
+/// How many of a page's layout regions the model reads per batch (the
+/// library default is 2). Output is byte-identical at any batch size
+/// (checked from 2 to 32). On an M2 Pro, 2022/1160 (6 pages, f16) took
+/// 237 s at 2, 192 s at 8, 184 s at 16, and 178 s at 32, and peak memory
+/// stayed ~5.9 GB throughout; 16 takes most of the gain.
+const REGION_BATCH_SIZE: usize = 16;
+
 /// The compute device used when `EPRINT_MD_DEVICE` isn't set: whatever GPU
 /// support this binary was built with, else CPU.
 pub fn default_device() -> &'static str {
@@ -79,7 +86,13 @@ trait PageModel {
 impl PageModel for MinerU {
     fn parse(&self, page: usize, image: &RgbImage) -> Result<Vec<DocumentBlock>> {
         let doc = self
-            .parse_page(image, &MinerUParseOptions::default())
+            .parse_page(
+                image,
+                &MinerUParseOptions {
+                    region_batch_size: REGION_BATCH_SIZE,
+                    ..MinerUParseOptions::default()
+                },
+            )
             .map_err(|e| anyhow!("{e}"))?;
         for d in &doc.diagnostics {
             warn!(page, stage = %d.stage, block = ?d.block_index, "{}", d.message);
@@ -133,7 +146,12 @@ impl Job {
             );
         }
         let start = Instant::now();
-        let model = MinerU::from_dir(&self.model_dir, device).map_err(|e| {
+        let mut runtime = oar_ocr_vl::RuntimeConfig::new(device);
+        let user_override = std::env::var_os("OAR_VL_DTYPE").is_some();
+        if let Some(dtype) = compute_dtype(runtime.device.is_metal(), user_override) {
+            runtime = runtime.with_dtype(dtype);
+        }
+        let model = MinerU::from_dir_with_runtime(&self.model_dir, runtime).map_err(|e| {
             anyhow!(
                 "loading MinerU2.5-Pro from {}: {e}",
                 self.model_dir.display()
@@ -226,6 +244,23 @@ fn convert_pages<M: PageModel>(
         markdown,
         failed_pages,
     })
+}
+
+/// The compute dtype to load the model with, or `None` for oar-ocr-vl's
+/// automatic choice (which honors an `OAR_VL_DTYPE` override).
+///
+/// On Apple GPUs the automatic choice is bf16, but f16 measured both faster
+/// and much closer to full precision (it keeps more mantissa bits), on an
+/// M2 Pro:
+///
+/// | paper (pages)    | time: bf16 / f16 / f32 | lines differing from f32: bf16 / f16 |
+/// |------------------|------------------------|--------------------------------------|
+/// | 2022/1160 (6)    | 255 / 237 / 306 s (b2) | 1 / 0                                |
+/// | 2020/020 (13)    | 580 / 543 / 667 s (b16)| 18 / 2                               |
+///
+/// CUDA and CPU keep the automatic choice: not benchmarked here.
+fn compute_dtype(is_metal: bool, user_override: bool) -> Option<candle_core::DType> {
+    (is_metal && !user_override).then_some(candle_core::DType::F16)
 }
 
 fn read_page_cache(path: &Path) -> Option<Vec<DocumentBlock>> {
@@ -399,6 +434,13 @@ mod tests {
         let err =
             convert_pages(b"not a pdf".to_vec(), dir.path(), |_, _| Ok(model), false).unwrap_err();
         assert!(err.to_string().contains("could not parse the PDF"), "{err}");
+    }
+
+    #[test]
+    fn metal_uses_f16_unless_the_user_chose_a_dtype() {
+        assert_eq!(compute_dtype(true, false), Some(candle_core::DType::F16));
+        assert_eq!(compute_dtype(true, true), None, "OAR_VL_DTYPE wins");
+        assert_eq!(compute_dtype(false, false), None, "CUDA/CPU: automatic");
     }
 
     #[test]

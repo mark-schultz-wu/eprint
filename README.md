@@ -45,7 +45,7 @@ parsed into blocks with LaTeX math, which become Markdown.
 - **Model download:** 2.2 GB on first use, into
   `<cache>/models/`. It's pinned to a specific commit and verified by
   SHA-256, and an interrupted download resumes.
-- **Speed:** about 30–60 s per page on an Apple M2 Pro GPU, and several
+- **Speed:** about 20–40 s per page on an Apple M2 Pro GPU, and several
   minutes per page on CPU only. Pages are cached as they finish, so an
   interrupted conversion resumes where it stopped.
 - **Device:** the best one the binary was built with (Metal on macOS, CUDA

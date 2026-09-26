@@ -35,6 +35,9 @@ image = { version = "0.25", default-features = false }
 # page parser (`MinerU::parse_page`) isn't in a crates.io release yet (0.9.2 has it
 # only as an example). TODO: switch to the crates.io release once 0.9.3 is out.
 oar-ocr-vl = { git = "https://github.com/GreatV/oar-ocr", rev = "2c4ab86733bc6efe4eee988e339194f60f188f66" }
+# Only to name the model's compute dtype; same version oar-ocr-vl uses, so
+# Cargo unifies them.
+candle-core = "0.11"
 # Streaming model-weights download + integrity check.
 futures-util = "0.3"
 sha2 = "0.10"

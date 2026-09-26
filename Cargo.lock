@@ -1020,6 +1020,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bytes",
+ "candle-core",
  "clap",
  "dialoguer",
  "dirs",
