@@ -28,6 +28,14 @@ eprint cache {path,list,clear}          # clear keeps the Markdown model; --mode
 
 `eprint <id> ...` is shorthand for `eprint paper <id> ...`.
 
+By default the tool talks to the mirror **eprint.iacr.asia**, because
+eprint.iacr.org blocks many automated requests. The mirror has no version
+archive, so it serves only each paper's current version: `--at` and
+`--select-version` can pick older versions only if they're already cached,
+or with `EPRINT_BASE_URL=https://eprint.iacr.org` (see
+[Configuration](#configuration)). On the mirror, a version is labelled by
+the paper's OAI-PMH datestamp when it was fetched.
+
 Global flags: `--offline`, `--json`, `-v`/`-vv`/`-vvv`, `--log-format=json`.
 Paper ids can be `2024/463`, `2024-463`, or a full eprint URL. Scripts can
 tell failures apart by exit code: 2 (no version resolved), 3 (PDF
@@ -62,6 +70,8 @@ Settings come from environment variables; there's no config file.
 | Variable | Meaning |
 |---|---|
 | `EPRINT_CACHE_DIR` | cache root (default: the OS cache dir, e.g. `~/Library/Caches/eprint` on macOS, `~/.cache/eprint` on Linux) |
+| `EPRINT_BASE_URL` | eprint host (default the mirror `https://eprint.iacr.asia`; `https://eprint.iacr.org` for the original) |
+| `EPRINT_ARCHIVE` | whether that host has the version archive and per-version PDFs (default `false` for the mirror, `true` for any other host) |
 | `EPRINT_CONTACT` | contact appended to the outbound `User-Agent` |
 | `EPRINT_MIN_INTERVAL_S` | minimum seconds between eprint requests (default `2.0`) |
 | `EPRINT_MD_DEVICE` | Markdown converter device: `metal`, `cuda`, or `cpu` |
@@ -71,8 +81,9 @@ Settings come from environment variables; there's no config file.
 ## Network etiquette
 
 eprint.iacr.org rate-limits per IP (HTTP 429 after about 20 rapid requests).
-The CLI paces itself (one request per `EPRINT_MIN_INTERVAL_S`, small bursts)
-and backs off and retries on 429.
+The CLI paces itself on any host (one request per `EPRINT_MIN_INTERVAL_S`,
+small bursts) and backs off and retries on 429. Version 0.1.0 was the last
+release built for eprint.iacr.org only; from 0.2.0 the mirror is the default.
 
 ## Development
 

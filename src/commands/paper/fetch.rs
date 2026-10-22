@@ -47,7 +47,15 @@ pub async fn ensure_version(
     );
 
     // Pull the bytes from the first source that has them.
-    let acquired = sources::acquire(cx, &sources::PdfRequest { id, version }).await?;
+    let acquired = sources::acquire(
+        cx,
+        &sources::PdfRequest {
+            id,
+            version,
+            current,
+        },
+    )
+    .await?;
     anyhow::ensure!(
         http::looks_like_pdf(&acquired.bytes),
         "{} bytes for {} version {} (source: {}) don't look like a PDF (missing %PDF header)",

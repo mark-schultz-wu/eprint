@@ -8,7 +8,8 @@
 //! | Var                          | Meaning                                                           |
 //! |------------------------------|-------------------------------------------------------------------|
 //! | `EPRINT_CACHE_DIR`           | cache root (default: OS cache dir + `/eprint`)                    |
-//! | `EPRINT_BASE_URL`            | eprint server (default `https://eprint.iacr.org`; for mirrors/tests) |
+//! | `EPRINT_BASE_URL`            | eprint server (default the mirror `https://eprint.iacr.asia`; e.g. `https://eprint.iacr.org`) |
+//! | `EPRINT_ARCHIVE`             | whether the server has the version archive (default `false` for the mirror, `true` otherwise) |
 //! | `EPRINT_CONTACT`             | contact appended to outbound `User-Agent`                         |
 //! | `EPRINT_MIN_INTERVAL_S`      | minimum seconds between outbound HTTP requests (default `2.0`)    |
 //! | `EPRINT_MD_DEVICE`           | Markdown converter device: `metal`, `cuda`, `cpu` (default: best built-in) |
@@ -35,6 +36,9 @@ pub struct Config {
 pub struct Network {
     /// eprint server base URL; see [`crate::iacr::site`].
     pub base_url: String,
+    /// Whether that server serves the version archive; see
+    /// [`crate::iacr::site::Site::has_archive`].
+    pub archive: bool,
     pub contact: Option<String>,
     /// Minimum spacing between eprint requests (sustained rate).
     pub min_interval: std::time::Duration,
@@ -50,11 +54,14 @@ pub struct Sync {
 impl Config {
     /// Compute the effective config from env vars + built-in defaults.
     pub fn from_env() -> Self {
+        let base_url = env_string("EPRINT_BASE_URL")
+            .unwrap_or_else(|| crate::iacr::site::DEFAULT_BASE_URL.to_owned());
         Self {
             cache_root: cache_root_from_env(),
             network: Network {
-                base_url: env_string("EPRINT_BASE_URL")
-                    .unwrap_or_else(|| crate::iacr::site::DEFAULT_BASE_URL.to_owned()),
+                archive: env_bool("EPRINT_ARCHIVE")
+                    .unwrap_or_else(|| !crate::iacr::site::is_default_mirror(&base_url)),
+                base_url,
                 contact: env_string("EPRINT_CONTACT"),
                 min_interval: env_seconds("EPRINT_MIN_INTERVAL_S")
                     .unwrap_or(std::time::Duration::from_secs(2)),

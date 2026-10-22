@@ -1,6 +1,6 @@
 [package]
 name = "eprint"
-version = "0.1.0"
+version = "0.2.0"
 description = "Fetch and convert IACR ePrint papers."
 edition = "2021"
 # oar-ocr-vl (the Markdown converter) needs 1.95.

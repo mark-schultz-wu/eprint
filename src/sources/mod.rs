@@ -1,7 +1,10 @@
 //! Pluggable PDF byte sources.
 //!
-//! Today a paper's PDF comes from eprint.iacr.org over HTTP. A
-//! **requester-pays S3 bucket** is planned as another source.
+//! Today a paper's PDF comes from the eprint host over HTTP: by exact
+//! version where the host has the version archive ([`EprintHttpSource`]),
+//! or as the current PDF only where it doesn't ([`EprintCurrentSource`],
+//! the default mirror). A **requester-pays S3 bucket** is planned as
+//! another source.
 //!
 //! Rather than special-casing each, acquisition goes through an ordered list of
 //! [`PdfSource`]s. [`acquire`] tries each in turn and takes the first that
@@ -12,6 +15,7 @@
 //! OAI-PMH) is a separate concern handled by the caller; sources only produce
 //! PDF bytes.
 
+mod eprint_current;
 mod eprint_http;
 
 use crate::cli::Context;
@@ -19,6 +23,7 @@ use crate::ids::version::Canonical;
 use crate::ids::PaperId;
 use anyhow::Result;
 use async_trait::async_trait;
+use eprint_current::EprintCurrentSource;
 use eprint_http::EprintHttpSource;
 use tracing::{info, warn};
 
@@ -26,6 +31,16 @@ use tracing::{info, warn};
 pub struct PdfRequest<'a> {
     pub id: PaperId,
     pub version: &'a Canonical,
+    /// The paper's current version, if known. A source that can only serve
+    /// the current PDF must check `version` against it.
+    pub current: Option<&'a Canonical>,
+}
+
+impl PdfRequest<'_> {
+    /// Whether the requested version is the paper's current one.
+    pub fn is_current(&self) -> bool {
+        self.current == Some(self.version)
+    }
 }
 
 /// Bytes plus provenance, so the caller can label the action it took.
@@ -57,14 +72,21 @@ pub trait PdfSource: Send + Sync {
 
 /// Build the ordered source list for this run. Order = priority.
 pub fn build_sources(cx: &Context) -> Vec<Box<dyn PdfSource>> {
-    vec![
-        // S3RequesterPaysSource will be inserted here.
+    // S3RequesterPaysSource will be inserted first.
+    let eprint: Box<dyn PdfSource> = if cx.site.has_archive() {
         Box::new(EprintHttpSource::new(
             cx.http.clone(),
             cx.rate_limiter.clone(),
             cx.site.clone(),
-        )),
-    ]
+        ))
+    } else {
+        Box::new(EprintCurrentSource::new(
+            cx.http.clone(),
+            cx.rate_limiter.clone(),
+            cx.site.clone(),
+        ))
+    };
+    vec![eprint]
 }
 
 /// Acquire the PDF for `req` from the first source that has it.
@@ -117,11 +139,26 @@ fn unavailable_message(cx: &Context, req: &PdfRequest<'_>, tried: &[String]) -> 
             "This version's PDF isn't in the cache and --offline skips network sources. \
              Re-run without --offline to fetch it."
         );
-    } else {
-        let url = cx.site.version_pdf_url(req.id, req.version);
+    } else if !cx.site.has_archive() && !req.is_current() {
+        let current = req
+            .current
+            .map_or_else(|| "unknown".to_owned(), ToString::to_string);
         let _ = write!(
             m,
-            "Fetching {url} failed (reason above). If eprint.iacr.org was rate-limiting, wait a \
+            "This host has no version archive, so it serves only the current version \
+             ({current}). For older versions, use a host that has the archive: \
+             EPRINT_BASE_URL={} (it may block automated requests).",
+            crate::iacr::site::IACR_BASE_URL,
+        );
+    } else {
+        let url = if cx.site.has_archive() {
+            cx.site.version_pdf_url(req.id, req.version)
+        } else {
+            cx.site.current_pdf_url(req.id)
+        };
+        let _ = write!(
+            m,
+            "Fetching {url} failed (reason above). If the host was rate-limiting, wait a \
              minute and re-run."
         );
     }

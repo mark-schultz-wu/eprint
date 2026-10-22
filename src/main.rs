@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     }
     let rate_limiter = iacr::http::rate_limiter(cfg.network.min_interval, 3);
     let cx = cli::Context {
-        site: iacr::site::Site::new(&cfg.network.base_url),
+        site: iacr::site::Site::new(&cfg.network.base_url, cfg.network.archive),
         http: iacr::http::client(cfg.network.contact.as_deref())?,
         cfg,
         offline: args.offline,

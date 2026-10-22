@@ -123,18 +123,23 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
         report.action("purged-outdated-cache");
     }
 
-    // 1. Refresh the archive listing if we have none, or `sync` saw the
-    //    paper change since the last listing.
+    // 1. Refresh the version list if we have none, or `sync` saw the paper
+    //    change since the last refresh: the archive listing, or on a host
+    //    without the archive (the default mirror), OAI-PMH's current version.
     let mut paper_meta = cache::read_paper_meta(root, id).await;
     let need_archive = args.force || paper_meta.as_ref().is_none_or(PaperMeta::needs_listing);
     if need_archive && !cx.offline {
         match known_versions::refresh(cx, id, paper_meta.clone()).await {
             Ok(new_meta) => {
                 paper_meta = Some(new_meta);
-                report.action("archive-listed");
+                report.action(if cx.site.has_archive() {
+                    "archive-listed"
+                } else {
+                    "oai-resolved"
+                });
             }
             Err(e) => {
-                warn!(error = %e, "could not scrape archive listing; falling back to whatever's on file")
+                warn!(error = %e, "could not refresh the version list; falling back to whatever's on file")
             }
         }
     }
@@ -142,13 +147,13 @@ pub async fn run(cx: &Context, args: PaperArgs) -> Result<()> {
     // 1b. If we still don't know the current version (archive scrape failed,
     //     or a brand-new paper), fall back to OAI-PMH GetRecord for the current
     //     version plus title/abstract. Without a version there's nothing to
-    //     file the PDF under.
+    //     file the PDF under. (Without an archive, step 1 already asked OAI.)
     let mut oai_abstract: Option<String> = None;
     let have_current = paper_meta
         .as_ref()
         .and_then(|p| p.current_version.as_ref())
         .is_some();
-    if !have_current && !cx.offline {
+    if !have_current && !cx.offline && cx.site.has_archive() {
         match oai::get_record(&cx.http, &cx.rate_limiter, &cx.site.oai_url(), id).await {
             Ok(Some(rec)) => match rec.datestamp.parse::<version::OaiDatestamp>() {
                 Ok(ds) => {

@@ -18,7 +18,9 @@ use time::OffsetDateTime;
 ///   advanced `current_version`, so the latest PDF could be saved under an
 ///   old version's directory.
 /// - 2: versions come only from the archive listing; `sync` records a
-///   `last_modified` hint that triggers a re-listing.
+///   `last_modified` hint that triggers a re-listing. (A host without the
+///   archive labels the current PDF with the OAI datestamp at fetch time;
+///   that needs no schema change, see `known_versions::refresh_from_oai`.)
 pub const SCHEMA: u32 = 2;
 
 /// Paper-level state. Lives at `<root>/<year>/<num>/meta.json`. Has no
@@ -31,12 +33,13 @@ pub struct PaperMeta {
     /// Cache format version; see [`SCHEMA`].
     #[serde(default)]
     pub schema: u32,
-    /// The paper's newest version, per the last archive listing (or, if the
-    /// listing was unreachable, OAI-PMH).
+    /// The paper's newest version, per the last archive listing. On a host
+    /// without the archive (the default mirror), or if the listing was
+    /// unreachable, it is the OAI-PMH datestamp at fetch time.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_version: Option<Canonical>,
-    /// All version timestamps known from the archive listing (cached or
-    /// not), ascending.
+    /// All version timestamps known (cached or not), ascending: from the
+    /// archive listing, or on a host without it, every current version seen.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub known_versions: Vec<Canonical>,
     /// Newest OAI-PMH datestamp `sync` has seen for this paper. That's the
@@ -82,6 +85,18 @@ impl PaperMeta {
             .or_else(|| known_versions.last().copied())
             .or(self.current_version);
         self.known_versions = known_versions;
+        self.listed_through = self.current_version.max(self.last_modified);
+    }
+
+    /// Record the current version on a host without the version archive,
+    /// where it comes from OAI-PMH. Versions seen earlier stay known, so their
+    /// cached PDFs remain selectable.
+    pub fn record_current(&mut self, current: Canonical) {
+        if !self.known_versions.contains(&current) {
+            self.known_versions.push(current);
+            self.known_versions.sort();
+        }
+        self.current_version = Some(current);
         self.listed_through = self.current_version.max(self.last_modified);
     }
 
@@ -271,6 +286,28 @@ mod tests {
             "same datestamp again isn't news"
         );
         assert!(!m.needs_listing());
+    }
+
+    /// Without an archive, each OAI-reported current version is added to the
+    /// known ones (earlier labels stay selectable), and a `sync` hint for a
+    /// newer modification triggers exactly one refresh.
+    #[test]
+    fn record_current_accumulates_versions_and_satisfies_the_sync_hint() {
+        let mut m = PaperMeta::new(None, vec![]);
+        m.record_current(v("20241017T150428Z"));
+        assert_eq!(m.current_version, Some(v("20241017T150428Z")));
+        assert!(!m.needs_listing());
+        assert!(m.note_modified(v("20250106T174348Z")));
+        assert!(m.needs_listing());
+        m.record_current(v("20250106T174348Z"));
+        assert_eq!(
+            m.known_versions,
+            vec![v("20241017T150428Z"), v("20250106T174348Z")]
+        );
+        assert_eq!(m.current_version, Some(v("20250106T174348Z")));
+        assert!(!m.needs_listing());
+        m.record_current(v("20250106T174348Z"));
+        assert_eq!(m.known_versions.len(), 2, "no duplicates");
     }
 
     #[tokio::test]

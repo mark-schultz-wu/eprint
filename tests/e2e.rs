@@ -946,3 +946,128 @@ async fn rate_limited_auto_sync_fails_fast_and_backs_off() {
         stderr(&out)
     );
 }
+
+// ---------------------------------------------------------------------------
+// A host without the version archive (the default mirror, eprint.iacr.asia):
+// versions come from OAI-PMH, and only the current PDF (`/<id>.pdf`) exists.
+// ---------------------------------------------------------------------------
+
+const MIRROR: &[(&str, &str)] = &[("EPRINT_ARCHIVE", "false")];
+
+/// OAI-PMH datestamp form of `V1`/`V2`.
+const V1_OAI: &str = "2024-03-19T14:35:40Z";
+const V2_OAI: &str = "2025-01-06T17:43:48Z";
+
+/// A mirror-style paper: OAI reports `datestamp`, and `/2024/463.pdf` is `pdf`.
+async fn serve_mirror_paper(h: &Harness, datestamp: &str, pdf: &[u8]) {
+    serve_oai(
+        h,
+        "GetRecord",
+        format!(
+            r#"<OAI-PMH><GetRecord><record><header>
+                <identifier>oai:eprint.iacr.org:2024/463</identifier>
+                <datestamp>{datestamp}</datestamp></header>
+              <metadata><dc><title>{TITLE}</title></dc></metadata>
+            </record></GetRecord></OAI-PMH>"#
+        ),
+    )
+    .await;
+    h.serve("/2024/463", LANDING).await;
+    h.serve("/2024/463.pdf", pdf.to_vec()).await;
+}
+
+/// Without an archive, the current PDF is filed under the OAI datestamp, and
+/// the archive endpoints are never requested.
+#[tokio::test(flavor = "multi_thread")]
+async fn mirror_files_the_current_pdf_under_the_oai_datestamp() {
+    let h = Harness::new().await;
+    serve_mirror_paper(&h, V2_OAI, PDF_V2).await;
+
+    let out = h.run(&["--json", "paper", ID], MIRROR).await;
+    assert!(out.status.success(), "{}", stderr(&out));
+    let report = json(&out);
+    assert_eq!(report["resolved_version"], V2);
+    assert_eq!(report["current_version"], V2);
+    assert_eq!(report["title"], TITLE);
+    assert_eq!(
+        report["actions"],
+        serde_json::json!(["oai-resolved", "fetched-pdf"])
+    );
+    let dir = h.version_dir(V2);
+    assert_eq!(read(&dir.join("paper.pdf")), PDF_V2);
+    assert!(dir.join("paper.bib").exists());
+    assert!(dir.join("abstract.txt").exists());
+    assert_eq!(h.requests_to("/archive/versions/2024/463").await, 0);
+    assert_eq!(
+        h.requests_to(&format!("/archive/2024/463/{V2_UNIX}.pdf"))
+            .await,
+        0
+    );
+}
+
+/// An older version can't come from the mirror: exit 3, say why and where
+/// to get it, and don't download the current PDF in its place.
+#[tokio::test(flavor = "multi_thread")]
+async fn mirror_refuses_a_non_current_version() {
+    let h = Harness::new().await;
+    serve_mirror_paper(&h, V2_OAI, PDF_V2).await;
+
+    let out = h.run(&["paper", ID, "--at", V1], MIRROR).await;
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    let err = stderr(&out);
+    assert!(err.contains("serves only the current version"), "{err}");
+    assert!(
+        err.contains("EPRINT_BASE_URL=https://eprint.iacr.org"),
+        "{err}"
+    );
+    assert_eq!(h.requests_to("/2024/463.pdf").await, 0);
+    assert!(!h.version_dir(V1).join("paper.pdf").exists());
+}
+
+/// A revision seen by `sync` is fetched into a new directory; the old one
+/// stays, and both versions stay known.
+#[tokio::test(flavor = "multi_thread")]
+async fn mirror_picks_up_a_revision_seen_by_sync() {
+    let h = Harness::new().await;
+    serve_mirror_paper(&h, V1_OAI, PDF_V1).await;
+    let out = h.run(&["paper", ID], MIRROR).await;
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(read(&h.version_dir(V1).join("paper.pdf")), PDF_V1);
+
+    h.server.reset().await;
+    serve_mirror_paper(&h, V2_OAI, PDF_V2).await;
+    serve_oai(&h, "ListRecords", oai_list_records(ID, V2_OAI)).await;
+    let out = h.run(&["sync"], MIRROR).await;
+    assert!(out.status.success(), "{}", stderr(&out));
+
+    let out = h.run(&["--json", "paper", ID], MIRROR).await;
+    assert!(out.status.success(), "{}", stderr(&out));
+    let report = json(&out);
+    assert_eq!(report["resolved_version"], V2);
+    assert_eq!(report["known_versions"], serde_json::json!([V1, V2]));
+    assert_eq!(read(&h.version_dir(V2).join("paper.pdf")), PDF_V2);
+    assert_eq!(read(&h.version_dir(V1).join("paper.pdf")), PDF_V1);
+}
+
+/// With no `EPRINT_BASE_URL`, requests go to the mirror. (The dead proxy
+/// makes the real request fail fast; the error names the host.)
+#[tokio::test(flavor = "multi_thread")]
+async fn the_default_host_is_the_mirror() {
+    let h = Harness::new().await;
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_eprint"));
+    cmd.args(["paper", ID])
+        .env_remove("EPRINT_BASE_URL")
+        .env_remove("EPRINT_ARCHIVE")
+        .env("EPRINT_CACHE_DIR", h.cache.path())
+        .env("EPRINT_AUTO_SYNC", "false")
+        .env("EPRINT_MIN_INTERVAL_S", "0.001")
+        .env("NO_COLOR", "1")
+        .env("HTTPS_PROXY", "http://127.0.0.1:9");
+    let out = tokio::task::spawn_blocking(move || cmd.output().unwrap())
+        .await
+        .unwrap();
+    assert!(!out.status.success());
+    let err = stderr(&out);
+    assert!(err.contains("eprint.iacr.asia"), "{err}");
+    assert!(!err.contains("eprint.iacr.org/archive"), "{err}");
+}
